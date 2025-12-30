@@ -6,9 +6,12 @@ from memory import memset, memset_zero
 
 from attention import ftype, sftype, nelts
 
+fn fillTensorRand[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
+    randn(x.ptr, layout.size(), 0, 1)
+
 fn randTensorHeap[layout: Layout]() -> LayoutTensor[ftype, layout, MutAnyOrigin]:
     var storage = alloc[sftype](layout.size())
-    randn(storage, layout.size(), 0, 0)
+    randn(storage, layout.size(), 0, 1)
     return LayoutTensor[ftype, layout, MutAnyOrigin](storage)
 
 fn zeroTensorHeap[layout: Layout]() -> LayoutTensor[ftype, layout, MutAnyOrigin]:

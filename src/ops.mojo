@@ -24,8 +24,9 @@ fn weightAndBias[layout_input: Layout,
 
     dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
 
-    @parameter
+    #@parameter
     for i in range(output.shape[0]()):
+        #@parameter
         for j in range(output.shape[1]()):
             output[i, j] += biases[j]
 
@@ -163,16 +164,16 @@ fn layerNorm[layout_input: Layout,
     comptime seq_len = x.shape[0]()
     comptime d_model = x.shape[1]()
 
-    @parameter
+    #@parameter
     for sl in range(seq_len):
         var sum: sftype = 0.0
-        @parameter
+        #@parameter
         for i in range(d_model):
             sum += rebind[sftype](x[sl, i])
         var mean = sum / d_model
 
         var variance: sftype = 0.0
-        @parameter
+        #@parameter
         for i in range(d_model):
             diff = rebind[sftype](x[sl, i] - mean)
             variance += diff * diff

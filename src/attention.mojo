@@ -13,7 +13,7 @@ from compile import compile_info
 import benchmark # run, Unit.ms
 #from kernels.nn.softmax import softmax
 
-from helpers import showProgress, cleanFunctionName, systemInfo, randTensorHeap, zeroTensorHeap, compareBuffers
+from helpers import showProgress, cleanFunctionName, systemInfo, randTensorHeap, zeroTensorHeap, compareBuffers, fillTensorRand
 from activation_fn import ActivationFunction, ReLU
 from ops import weightAndBias, naiveSoftmax, layerNorm, feedForward, naiveAttention
 
@@ -22,6 +22,8 @@ comptime sftype = Scalar[ftype] # 's' prefix = 'S'calar
 comptime nelts = simd_width_of[ftype]()
 
 struct ModelParams():
+    comptime num_transformer_blocks = 1 << 2
+
     comptime vocab_size = 1 << 8
 
     comptime max_batch_size = 1 << 5 # hmm
@@ -33,7 +35,7 @@ struct ModelParams():
 
     comptime d_ff = Self.d_model << 2 # d_model * 4 is common, apparently
 
-trait Weights:
+trait Weights(Defaultable):
     @staticmethod
     fn initRandom(out self: Self):
         ...
@@ -61,20 +63,28 @@ struct AttentionWeights(Weights, Copyable, Movable):
     var b_q: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_k: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
+
     fn __init__(out self):
-        print("AttentionWeights __init__() ERROR", file = stderr)
+        self.W_q = type_of(self.W_q)(alloc[sftype](Self.W_q_layout.size())).fill(0.0)
+        self.W_k = type_of(self.W_k)(alloc[sftype](Self.W_q_layout.size())).fill(0.0)
+        self.W_v = type_of(self.W_v)(alloc[sftype](Self.W_v_layout.size())).fill(0.0)
+        self.b_q = type_of(self.b_q)(alloc[sftype](Self.b_q_layout.size())).fill(0.0)
+        self.b_k = type_of(self.b_k)(alloc[sftype](Self.b_q_layout.size())).fill(0.0)
+        self.b_v = type_of(self.b_v)(alloc[sftype](Self.b_v_layout.size())).fill(0.0)
 
     @staticmethod
     fn initRandom(out self: Self):
-        self.W_q = randTensorHeap[Self.W_q_layout]()
-        self.W_k = randTensorHeap[Self.W_q_layout]()
-        self.W_v = randTensorHeap[Self.W_v_layout]()
+        self = Self()
+        fillTensorRand(self.W_q)
+        fillTensorRand(self.W_q)
+        fillTensorRand(self.W_v)
     
-        self.b_q = randTensorHeap[Self.b_q_layout]()
-        self.b_k = randTensorHeap[Self.b_q_layout]()
-        self.b_v = randTensorHeap[Self.b_v_layout]()
+        fillTensorRand(self.b_q)
+        fillTensorRand(self.b_q)
+        fillTensorRand(self.b_v)
 
     fn __del__(deinit self):
+        print("AttentionWeights __del__()")
         self.W_q.ptr.free()
         self.W_k.ptr.free()
         self.W_v.ptr.free()
@@ -98,20 +108,24 @@ struct FFWeights(Weights, Copyable, Movable):
     comptime __moveinit__is_trivial = True
 
     fn __init__(out self):
-        print("FFWeights __init__() ERROR", file = stderr)
+        self.w0 = type_of(self.w0)(alloc[sftype](Self.w0_layout.size())).fill(0.0)
+        self.b0 = type_of(self.b0)(alloc[sftype](Self.b0_layout.size())).fill(0.0)
+        self.w1 = type_of(self.w1)(alloc[sftype](Self.w1_layout.size())).fill(0.0)
+        self.b1 = type_of(self.b1)(alloc[sftype](Self.b1_layout.size())).fill(0.0)
 
     @staticmethod
     fn initRandom(out self: Self):
-        self.w0 = randTensorHeap[Self.w0_layout]()
-        self.w1 = randTensorHeap[Self.w1_layout]()
-
-        self.b0 = randTensorHeap[Self.b0_layout]()
-        self.b1 = randTensorHeap[Self.b1_layout]()
+        self = Self()
+        fillTensorRand(self.w0)
+        fillTensorRand(self.b0)
+        fillTensorRand(self.w1)
+        fillTensorRand(self.b1)
 
     fn __del__(deinit self):
+        print("FFWeights __del__()")
         self.w0.ptr.free()
-        self.w1.ptr.free()
         self.b0.ptr.free()
+        self.w1.ptr.free()
         self.b1.ptr.free()
 
 struct LayerNormWeights(Weights, Copyable, Movable):
@@ -121,14 +135,17 @@ struct LayerNormWeights(Weights, Copyable, Movable):
     var gamma: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     fn __init__(out self):
-        print("LayerNormWeights __init__() ERROR", file = stderr)
+        self.gamma = type_of(self.gamma)(alloc[sftype](Self.gamma_layout.size())).fill(0.0)
+        self.beta = type_of(self.beta)(alloc[sftype](Self.gamma_layout.size())).fill(0.0)
 
     @staticmethod
     fn initRandom(out self: Self):
-        self.gamma = randTensorHeap[Self.gamma_layout]()
-        self.beta = randTensorHeap[Self.gamma_layout]()
+        self = Self()
+        fillTensorRand(self.gamma)
+        fillTensorRand(self.beta)
 
     fn __del__(deinit self):
+        print("LayerNormWeights __del__()")
         self.gamma.ptr.free()
         self.beta.ptr.free()
 
@@ -141,15 +158,17 @@ struct OutputWeights(Weights, Copyable, Movable):
     var b: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
     fn __init__(out self):
-        print("OutputWeights __init__() ERROR", file = stderr)
-        pass
+        self.W = type_of(self.W)(alloc[sftype](Self.W_layout.size())).fill(0.0)
+        self.b = type_of(self.b)(alloc[sftype](Self.b_layout.size())).fill(0.0)
 
     @staticmethod
     fn initRandom(out self: Self):
-        self.W = randTensorHeap[Self.W_layout]()
-        self.b = randTensorHeap[Self.b_layout]()
+        self = Self()
+        fillTensorRand(self.W)
+        fillTensorRand(self.b)
 
     fn __del__(deinit self):
+        print("OutputWeights __del__()")
         self.W.ptr.free()
         self.b.ptr.free()
 
@@ -185,28 +204,53 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
     var ffn_hidden: LayoutTensor[ftype, Self.ffn_hidden_layout, MutAnyOrigin]
     var ffn_out: LayoutTensor[ftype, Self.ffn_out_layout, MutAnyOrigin]
 
+    fn __init__(out self):
+        self.ln_attn = LayerNormWeights()
+        self.attn_weights = AttentionWeights()
+        self.ln_ffn = LayerNormWeights()
+        self.ffn_weights = FFWeights()
+
+        self.X_pre_ln_attn = type_of(self.X_pre_ln_attn)(alloc[sftype](Self.X_layout.size())).fill(0.0)
+        self.X_post_ln_attn = type_of(self.X_post_ln_attn)(alloc[sftype](Self.X_layout.size())).fill(0.0)
+        
+        self.Q = type_of(self.Q)(alloc[sftype](Self.Q_layout.size())).fill(0.0)
+        self.K = type_of(self.K)(alloc[sftype](Self.Q_layout.size())).fill(0.0)
+        self.V = type_of(self.V)(alloc[sftype](Self.V_layout.size())).fill(0.0)
+        
+        # initialize attn_scores, attn_out, ffn_hidden, ffn_output to zeros ...
+        self.attn_scores = type_of(self.attn_scores)(alloc[sftype](Self.attn_scores_layout.size())).fill(0.0)
+        self.attn_probs = type_of(self.attn_probs)(alloc[sftype](Self.attn_scores_layout.size())).fill(0.0)
+        self.attn_out_pre_residual = type_of(self.attn_out_pre_residual)(alloc[sftype](Self.V_layout.size())).fill(0.0)
+        self.attn_out_post_residual = type_of(self.attn_out_post_residual)(alloc[sftype](Self.V_layout.size())).fill(0.0)
+        self.ffn_input = type_of(self.ffn_input)(alloc[sftype](Self.V_layout.size())).fill(0.0)
+        self.ffn_hidden = type_of(self.ffn_hidden)(alloc[sftype](Self.ffn_hidden_layout.size())).fill(0.0)
+        self.ffn_out = type_of(self.ffn_out)(alloc[sftype](Self.ffn_out_layout.size())).fill(0.0)
+
     @staticmethod
     fn initRandom(out self: Self):
+        self = Self()
+        # TODO : old memory should be set in-place, this is awful
         self.ln_attn = LayerNormWeights.initRandom()
         self.attn_weights = AttentionWeights.initRandom()
         self.ln_ffn = LayerNormWeights.initRandom()
         self.ffn_weights = FFWeights.initRandom()
+        # /END AWFUL
 
-        self.X_pre_ln_attn = zeroTensorHeap[Self.X_layout]()
-        self.X_post_ln_attn = zeroTensorHeap[Self.X_layout]()
+        fillTensorRand(self.X_pre_ln_attn)
+        fillTensorRand(self.X_post_ln_attn)
         
-        self.Q = zeroTensorHeap[Self.Q_layout]()
-        self.K = zeroTensorHeap[Self.Q_layout]()
-        self.V = zeroTensorHeap[Self.V_layout]()
+        fillTensorRand(self.Q)
+        fillTensorRand(self.K)
+        fillTensorRand(self.V)
         
         # initialize attn_scores, attn_out, ffn_hidden, ffn_output to zeros ...
-        self.attn_scores = zeroTensorHeap[Self.attn_scores_layout]()
-        self.attn_probs = zeroTensorHeap[Self.attn_scores_layout]()
-        self.attn_out_pre_residual = zeroTensorHeap[Self.V_layout]()
-        self.attn_out_post_residual = zeroTensorHeap[Self.V_layout]()
-        self.ffn_input = zeroTensorHeap[Self.V_layout]()
-        self.ffn_hidden = zeroTensorHeap[Self.ffn_hidden_layout]()
-        self.ffn_out = zeroTensorHeap[Self.ffn_out_layout]()
+        fillTensorRand(self.attn_scores)
+        fillTensorRand(self.attn_probs)
+        fillTensorRand(self.attn_out_pre_residual)
+        fillTensorRand(self.attn_out_post_residual)
+        fillTensorRand(self.ffn_input)
+        fillTensorRand(self.ffn_hidden)
+        fillTensorRand(self.ffn_out)
 
     fn forward[layout: Layout,
                out_layout: Layout](
@@ -214,6 +258,8 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
                     X: LayoutTensor[ftype, layout, MutAnyOrigin],
                     mut output: LayoutTensor[ftype, out_layout, MutAnyOrigin]):
 
+        print("begin tb forward")
+        print("\tlayerNorm1")
         # layerNorm(input, gamma, beta, output)
         self.X_pre_ln_attn.copy_from(X)
         layerNorm(X,
@@ -221,6 +267,7 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
                   self.ln_attn.beta,
                   self.X_post_ln_attn)
 
+        print("\tgenerate QKV")
         # weightAndBias(input, weight, bias, output)
         weightAndBias(self.X_post_ln_attn,
                       self.attn_weights.W_q,
@@ -235,21 +282,25 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
                       self.attn_weights.b_v,
                       self.V)
 
+        print("\tnaive attention")
         # causal masking not implemented YET
         naiveAttention(self.Q, self.K, self.V,
                        self.attn_scores,    # intermediate buffer # backprop
                        self.attn_probs,     # intermediate buffer # backprop
                        self.attn_out_pre_residual)
 
+        print("\tresidual conn #1")
         # residual conn #1
         self.attn_out_post_residual.copy_from(self.attn_out_pre_residual)
         self.attn_out_post_residual += self.X_pre_ln_attn
 
+        print("\tlayerNorm2")
         layerNorm(self.attn_out_post_residual,
                   self.ln_ffn.gamma,
                   self.ln_ffn.beta,
                   self.ffn_input)
 
+        print("\tfeedForward")
         # feedForward(input, w0, b0, w1, b1, hidden_buffer, output)
         feedForward(self.ffn_input,
                     self.ffn_weights.w0,
@@ -259,58 +310,79 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
                     self.ffn_hidden,
                     self.ffn_out)
 
+        print("final residual")
         output.copy_from(self.ffn_out)
         output += self.attn_out_post_residual
 
     fn __del__(deinit self):
+        
+        print("TransformerBlock __del__()")
+        print("noop")
+        _ = """
         # not sure since nested, leave structs alone?
         self.X_pre_ln_attn.ptr.free()
         self.X_post_ln_attn.ptr.free()
-
+        print("DEBUG Q")
         self.Q.ptr.free()
+        print("DEBUG K")
         self.K.ptr.free()
+        print("DEBUG V")
         self.V.ptr.free()
-        
-        self.attn_scores.ptr.free()
-        self.attn_probs.ptr.free()
-        self.attn_out_pre_residual.ptr.free()
-        self.attn_out_post_residual.ptr.free()
-        self.ffn_input.ptr.free()
-        self.ffn_hidden.ptr.free()
-        self.ffn_out.ptr.free()
 
+        print("DEBUG scores")
+        self.attn_scores.ptr.free()
+        print("DEBUG probs")
+        self.attn_probs.ptr.free()
+        print("DEBUG attn_out_pre")
+        self.attn_out_pre_residual.ptr.free()
+        print("DEBUG attn_out_post")
+        self.attn_out_post_residual.ptr.free()
+        print("DEBUG ffn_input")
+        self.ffn_input.ptr.free()
+        print("DEBUG ffn_hidden")
+        self.ffn_hidden.ptr.free()
+        print("DEBUG ffn_out")
+        self.ffn_out.ptr.free()
+        print("DEBUG DONE")
+        """
 struct LLM():
-    #comptime params = ModelParams
-    comptime num_transformer_blocks = 1 << 2
-    var blocks: InlineArray[TransformerBlock, Self.num_transformer_blocks]
+
+    var blocks: InlineArray[TransformerBlock, ModelParams.num_transformer_blocks]
     var ln_final_weights: LayerNormWeights
     var output_weights: OutputWeights
     comptime output_layout = Layout.row_major(ModelParams.seq_len, ModelParams.vocab_size)
     var logits: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
-    var output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
+    #var output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
     fn __init__(out self): # allocate buffers and pre-fill / load etc.
         self.blocks = type_of(self.blocks)(fill = TransformerBlock.initRandom())
         self.ln_final_weights = LayerNormWeights.initRandom()
         self.output_weights = OutputWeights.initRandom()
         self.logits = zeroTensorHeap[Self.output_layout]()
-        self.output = zeroTensorHeap[Self.output_layout]()
+        #self.output = zeroTensorHeap[Self.output_layout]()
 
-    fn forward(mut self, X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
-                out output: LayoutTensor[ftype, self.output_layout, MutAnyOrigin]):
+    fn forward(mut self,
+               X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
+               out output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]):
         """
         Caller owns memory of logits.
         """
         var block_output = X
         for i in range(len(self.blocks)):
-            self.blocks[i].forward(block_output, self.blocks[i].ffn_out)
+            print("LLM TransformerBlock", i)
+            var ffn_out_temp = LayoutTensor[ftype, TransformerBlock.ffn_out_layout, MutAnyOrigin].stack_allocation()
+            self.blocks[i].forward(block_output, ffn_out_temp)
+            self.blocks[i].ffn_out.copy_from(ffn_out_temp)
             block_output = self.blocks[i].ffn_out
 
+        print("LLM forward blocks done")
         layerNorm(block_output, self.ln_final_weights.gamma, self.ln_final_weights.beta, self.logits)
 
+        print("Final linear layer...")
+        output = zeroTensorHeap[Self.output_layout]()
         weightAndBias(self.logits, self.output_weights.W, self.output_weights.b, output)
         #naiveSoftmax(output)
 
     fn __del__(deinit self):
+        print("LLM __del__()")
         self.logits.ptr.free()
-        self.output.ptr.free()
