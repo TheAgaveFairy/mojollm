@@ -15,7 +15,7 @@ import benchmark # run, Unit.ms
 
 from helpers import showProgress, cleanFunctionName, systemInfo, randTensorHeap, zeroTensorHeap, compareBuffers
 from activation_fn import ActivationFunction, ReLU
-from ops import naiveDotProductBatched, dotProductSlices, naiveSoftmaxBatched, layerNorm, feedForward, naiveAttention
+from ops import weightAndBias, naiveSoftmax, layerNorm, feedForward, naiveAttention
 
 comptime ftype = DType.float32
 comptime sftype = Scalar[ftype] # 's' prefix = 'S'calar
@@ -84,15 +84,15 @@ struct AttentionWeights(Weights, Copyable, Movable):
         self.b_v.ptr.free()
     
 struct FFWeights(Weights, Copyable, Movable):
-    comptime wff0_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_ff)
-    comptime wff1_layout = Layout.row_major(ModelParams.d_ff, ModelParams.d_model)
-    var wff0: LayoutTensor[ftype, Self.wff0_layout, MutAnyOrigin]
-    var wff1: LayoutTensor[ftype, Self.wff1_layout, MutAnyOrigin]
+    comptime w0_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_ff)
+    comptime w1_layout = Layout.row_major(ModelParams.d_ff, ModelParams.d_model)
+    var w0: LayoutTensor[ftype, Self.w0_layout, MutAnyOrigin]
+    var w1: LayoutTensor[ftype, Self.w1_layout, MutAnyOrigin]
 
-    comptime bff0_layout = Layout.row_major(ModelParams.d_ff)
-    comptime bff1_layout = Layout.row_major(ModelParams.d_model)
-    var bff0: LayoutTensor[ftype, Self.bff0_layout, MutAnyOrigin]
-    var bff1: LayoutTensor[ftype, Self.bff1_layout, MutAnyOrigin]
+    comptime b0_layout = Layout.row_major(ModelParams.d_ff)
+    comptime b1_layout = Layout.row_major(ModelParams.d_model)
+    var b0: LayoutTensor[ftype, Self.b0_layout, MutAnyOrigin]
+    var b1: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
@@ -102,17 +102,17 @@ struct FFWeights(Weights, Copyable, Movable):
 
     @staticmethod
     fn initRandom(out self: Self):
-        self.wff0 = randTensorHeap[Self.wff0_layout]()
-        self.wff1 = randTensorHeap[Self.wff1_layout]()
+        self.w0 = randTensorHeap[Self.w0_layout]()
+        self.w1 = randTensorHeap[Self.w1_layout]()
 
-        self.bff0 = randTensorHeap[Self.bff0_layout]()
-        self.bff1 = randTensorHeap[Self.bff1_layout]()
+        self.b0 = randTensorHeap[Self.b0_layout]()
+        self.b1 = randTensorHeap[Self.b1_layout]()
 
     fn __del__(deinit self):
-        self.wff0.ptr.free()
-        self.wff1.ptr.free()
-        self.bff0.ptr.free()
-        self.bff1.ptr.free()
+        self.w0.ptr.free()
+        self.w1.ptr.free()
+        self.b0.ptr.free()
+        self.b1.ptr.free()
 
 struct LayerNormWeights(Weights, Copyable, Movable):
     comptime __copyinit__is_trivial = True
@@ -135,10 +135,10 @@ struct LayerNormWeights(Weights, Copyable, Movable):
 struct OutputWeights(Weights, Copyable, Movable):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
-    comptime W_output_layout = Layout.row_major(ModelParams.d_model, ModelParams.vocab_size)
-    comptime b_output_layout = Layout.row_major(ModelParams.vocab_size)
-    var W_output: LayoutTensor[ftype, Self.W_output_layout, MutAnyOrigin]
-    var b_output: LayoutTensor[ftype, Self.b_output_layout, MutAnyOrigin]
+    comptime W_layout = Layout.row_major(ModelParams.d_model, ModelParams.vocab_size)
+    comptime b_layout = Layout.row_major(ModelParams.vocab_size)
+    var W: LayoutTensor[ftype, Self.W_layout, MutAnyOrigin]
+    var b: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
     fn __init__(out self):
         print("OutputWeights __init__() ERROR", file = stderr)
@@ -146,12 +146,12 @@ struct OutputWeights(Weights, Copyable, Movable):
 
     @staticmethod
     fn initRandom(out self: Self):
-        self.W_output = randTensorHeap[Self.W_output_layout]()
-        self.b_output = randTensorHeap[Self.b_output_layout]()
+        self.W = randTensorHeap[Self.W_layout]()
+        self.b = randTensorHeap[Self.b_layout]()
 
     fn __del__(deinit self):
-        self.W_output.ptr.free()
-        self.B_output.ptr.free()
+        self.W.ptr.free()
+        self.b.ptr.free()
 
 struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weights trait
     comptime __copyinit__is_trivial = True
@@ -161,6 +161,10 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
     var ffn_weights: FFWeights
     var ln_ffn: LayerNormWeights
 
+    comptime X_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_model)
+    var X_pre_ln_attn: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
+    var X_post_ln_attn: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
+
     # intermediate buffers
     comptime Q_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_k) # is K_Layout
     comptime V_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_v)
@@ -168,52 +172,112 @@ struct TransformerBlock(Copyable): # decoder, also would take Layer and/or Weigh
     var K: LayoutTensor[ftype, Self.Q_layout, MutAnyOrigin]
     var V: LayoutTensor[ftype, Self.V_layout, MutAnyOrigin]
 
-    var attn_scores: LayoutTensor[ftype, Self., MutAnyOrigin]
-    var attn_probs: LayoutTensor[ftype, Self., MutAnyOrigin]
-    var attn_out: LayoutTensor[ftype, Self., MutAnyOrigin]
-    var ffn_hidden: LayoutTensor[ftype, Self., MutAnyOrigin]
+    comptime attn_scores_layout = Layout.row_major(ModelParams.seq_len, ModelParams.seq_len)
+    var attn_scores: LayoutTensor[ftype, Self.attn_scores_layout, MutAnyOrigin]
+    var attn_probs: LayoutTensor[ftype, Self.attn_scores_layout, MutAnyOrigin]
+
+    var attn_out_pre_residual: LayoutTensor[ftype, Self.V_layout, MutAnyOrigin]
+    var attn_out_post_residual: LayoutTensor[ftype, Self.V_layout, MutAnyOrigin]
+    
+    comptime ffn_hidden_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_ff)
+    comptime ffn_out_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_model)
+    var ffn_input: LayoutTensor[ftype, Self.V_layout, MutAnyOrigin]
+    var ffn_hidden: LayoutTensor[ftype, Self.ffn_hidden_layout, MutAnyOrigin]
+    var ffn_out: LayoutTensor[ftype, Self.ffn_out_layout, MutAnyOrigin]
 
     @staticmethod
     fn initRandom(out self: Self):
         self.ln_attn = LayerNormWeights.initRandom()
         self.attn_weights = AttentionWeights.initRandom()
-        self.ffn_weights = FFWeights.initRandom()
         self.ln_ffn = LayerNormWeights.initRandom()
+        self.ffn_weights = FFWeights.initRandom()
 
-    # could this make sense as a pattern?
+        self.X_pre_ln_attn = zeroTensorHeap[Self.X_layout]()
+        self.X_post_ln_attn = zeroTensorHeap[Self.X_layout]()
+        
+        self.Q = zeroTensorHeap[Self.Q_layout]()
+        self.K = zeroTensorHeap[Self.Q_layout]()
+        self.V = zeroTensorHeap[Self.V_layout]()
+        
+        # initialize attn_scores, attn_out, ffn_hidden, ffn_output to zeros ...
+        self.attn_scores = zeroTensorHeap[Self.attn_scores_layout]()
+        self.attn_probs = zeroTensorHeap[Self.attn_scores_layout]()
+        self.attn_out_pre_residual = zeroTensorHeap[Self.V_layout]()
+        self.attn_out_post_residual = zeroTensorHeap[Self.V_layout]()
+        self.ffn_input = zeroTensorHeap[Self.V_layout]()
+        self.ffn_hidden = zeroTensorHeap[Self.ffn_hidden_layout]()
+        self.ffn_out = zeroTensorHeap[Self.ffn_out_layout]()
+
     fn forward[layout: Layout,
                out_layout: Layout](
-                    self,
+                    mut self,
                     X: LayoutTensor[ftype, layout, MutAnyOrigin],
-                    output: LayoutTensor[ftype, out_layout, MutAnyOrigin]):
+                    mut output: LayoutTensor[ftype, out_layout, MutAnyOrigin]):
 
-        # layerNorm input
-        # mha w/ causal masking
-        # residual conn
-        # layerNorm again
-        # ffn
-        # residual
-        layerNorm(X, self.ln_attn.gamma, self.ln_attn.beta) # 'x' is inout
-        naiveAttention(self.attn_weights.Q,
-                       self.attn_weights.K,
-                       self.attn_weights.V,
-                       self.attn_weights.scores,
-                       output)
+        # layerNorm(input, gamma, beta, output)
+        self.X_pre_ln_attn.copy_from(X)
+        layerNorm(X,
+                  self.ln_attn.gamma,
+                  self.ln_attn.beta,
+                  self.X_post_ln_attn)
 
+        # weightAndBias(input, weight, bias, output)
+        weightAndBias(self.X_post_ln_attn,
+                      self.attn_weights.W_q,
+                      self.attn_weights.b_q,
+                      self.Q)
+        weightAndBias(self.X_post_ln_attn,
+                      self.attn_weights.W_k,
+                      self.attn_weights.b_k,
+                      self.K)
+        weightAndBias(self.X_post_ln_attn,
+                      self.attn_weights.W_v,
+                      self.attn_weights.b_v,
+                      self.V)
 
-        naiveAttention(X, self.att)
+        # causal masking not implemented YET
+        naiveAttention(self.Q, self.K, self.V,
+                       self.attn_scores,    # intermediate buffer # backprop
+                       self.attn_probs,     # intermediate buffer # backprop
+                       self.attn_out_pre_residual)
 
+        # residual conn #1
+        self.attn_out_post_residual.copy_from(self.attn_out_pre_residual)
+        self.attn_out_post_residual += self.X_pre_ln_attn
+
+        layerNorm(self.attn_out_post_residual,
+                  self.ln_ffn.gamma,
+                  self.ln_ffn.beta,
+                  self.ffn_input)
+
+        # feedForward(input, w0, b0, w1, b1, hidden_buffer, output)
+        feedForward(self.ffn_input,
+                    self.ffn_weights.w0,
+                    self.ffn_weights.b0,
+                    self.ffn_weights.w1,
+                    self.ffn_weights.b1,
+                    self.ffn_hidden,
+                    self.ffn_out)
+
+        output.copy_from(self.ffn_out)
+        output += self.attn_out_post_residual
 
     fn __del__(deinit self):
         # not sure since nested, leave structs alone?
-        # clear buffers
+        self.X_pre_ln_attn.ptr.free()
+        self.X_post_ln_attn.ptr.free()
+
         self.Q.ptr.free()
         self.K.ptr.free()
         self.V.ptr.free()
+        
         self.attn_scores.ptr.free()
         self.attn_probs.ptr.free()
-        self.attn_out.ptr.free()
+        self.attn_out_pre_residual.ptr.free()
+        self.attn_out_post_residual.ptr.free()
+        self.ffn_input.ptr.free()
         self.ffn_hidden.ptr.free()
+        self.ffn_out.ptr.free()
 
 struct LLM():
     #comptime params = ModelParams
@@ -221,84 +285,32 @@ struct LLM():
     var blocks: InlineArray[TransformerBlock, Self.num_transformer_blocks]
     var ln_final_weights: LayerNormWeights
     var output_weights: OutputWeights
+    comptime output_layout = Layout.row_major(ModelParams.seq_len, ModelParams.vocab_size)
+    var logits: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
+    var output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
     fn __init__(out self): # allocate buffers and pre-fill / load etc.
         self.blocks = type_of(self.blocks)(fill = TransformerBlock.initRandom())
         self.ln_final_weights = LayerNormWeights.initRandom()
         self.output_weights = OutputWeights.initRandom()
+        self.logits = zeroTensorHeap[Self.output_layout]()
+        self.output = zeroTensorHeap[Self.output_layout]()
 
-    fn forward[layout: Layout](mut self, X: LayoutTensor[ftype, layout, MutAnyOrigin],
-                               out logits: LayoutTensor[ftype, Layout.row_major(ModelParams.seq_len, ModelParams.vocab_size), MutAnyOrigin]):
+    fn forward(mut self, X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
+                out output: LayoutTensor[ftype, self.output_layout, MutAnyOrigin]):
         """
         Caller owns memory of logits.
         """
-        var logits_storage = alloc[sftype](logits.layout.size())
-        logits = type_of(logits)(logits_storage)
+        var block_output = X
+        for i in range(len(self.blocks)):
+            self.blocks[i].forward(block_output, self.blocks[i].ffn_out)
+            block_output = self.blocks[i].ffn_out
 
-        for block in range(len(self.blocks)):
-            blocks[block].forward(X)
+        layerNorm(block_output, self.ln_final_weights.gamma, self.ln_final_weights.beta, self.logits)
 
-        layerNorm(X, ln_final_weights)
-        gemm(X, output_weights, logits)
-    
-        _ = """
-        # some functions I wrote weren't setup for batching so you'll see them handled as such
-        @parameter
-        for b in range(ModelParams.batch_size):
-            var x_slice_temp = X.slice[Slice(0, X.shape[1]()), Slice(0, X.shape[2]()), IndexList[2](1,2)](b)
-            var x_slice = rebind[LayoutTensor[ftype, Layout.row_major(ModelParams.seq_len, ModelParams.d_model), MutAnyOrigin]](x_slice_temp)
-            layerNorm(x_slice, self.ln0_weights.gamma, self.ln0_weights.beta)
+        weightAndBias(self.logits, self.output_weights.W, self.output_weights.b, output)
+        #naiveSoftmax(output)
 
-        # TODO: add biases
-        naiveDotProductBatched(X, self.attn_weights.W_q, self.Q)
-        naiveDotProductBatched(X, self.attn_weights.W_k, self.K)
-        naiveDotProductBatched(X, self.attn_weights.W_v, self.V)
-
-        # BEGIN TRANSFORMER BLOCK, WE WOULD STACK THIS MANY TIMES (how exactly, I don't know)
-        #for block in self.blocks:
-            #block.forward(input_here)
-        comptime attn_output_layout = Layout.row_major(ModelParams.batch_size, ModelParams.seq_len, ModelParams.d_v)
-        #var output_buffer = alloc[sftype](output_layout.size())
-        var attn_output = LayoutTensor[ftype, attn_output_layout, MutAnyOrigin].stack_allocation()#(output_buffer)
-
-        # takes the whole batch
-        naiveAttention(self.Q, self.K, self.V, attn_output)
-        
-        # residual connection
-        attn_output += X
-
-        # allocate the output_buffer for the feedForward as ff_output ?
-        comptime ff_output_layout = Layout.row_major(ModelParams.batch_size, ModelParams.seq_len, ModelParams.d_model)
-        var ff_output = LayoutTensor[ftype, ff_output_layout, MutAnyOrigin].stack_allocation()
-
-        @parameter
-        for b in range(ModelParams.batch_size):
-            # get the attn_output slice
-            layerNorm(attn_output_slice, self.ln1_weights.gamma, self.ln1_weights.beta)
-            feedForward(attn_output_slice, self.wffn_weights_and_biases, ff_output_slice) # etc - i'll change signatures later to accept the weight-holding structs, to become consistent on what takes batches vs slices, etc)
-        ff_output += attn_output
-        # END TRANSFORMER BLOCK "LOOP" HERE.
-        
-        # final Layer norm -> linear projection to vocab, output logits(?), final softmax, walk me through this
-        @parameter
-        for b in range(ModelParams.batch_size):
-            # get slices as needed for now
-            layerNorm(ff_output_slice, self.ln2_weights)
-        
-            comptime logits_layout = Layout.row_major(ModelParams.seq_len, ModelParams.vocab_size)
-            var logits = LayoutTensor[ftype, logits_layout, MutAnyOrigin].stack_allocation()
-        
-            dotProductSlices(ff_output_slice, self.output_weights.W_output, logits)
-            logits += self.output_weights.b_output
-        
-        naiveSoftmaxBatched(final_output)
-
-        # do something with final output
-        """
-
-fn main():
-    seed(42)
-    systemInfo[ftype]()
-
-    var llm = LLM()
-    benchmark.compiler.keep(llm)
+    fn __del__(deinit self):
+        self.logits.ptr.free()
+        self.output.ptr.free()

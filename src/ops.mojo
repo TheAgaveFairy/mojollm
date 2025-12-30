@@ -16,14 +16,18 @@ from activation_fn import ActivationFunction, ReLU
 fn weightAndBias[layout_input: Layout,
         layout_weights: Layout,
         layout_bias: Layout,
-        layout.output: Layout](
+        layout_output: Layout](
                 input: LayoutTensor[ftype, layout_input, MutAnyOrigin],
                 weights: LayoutTensor[ftype, layout_weights, MutAnyOrigin],
                 biases: LayoutTensor[ftype, layout_bias, MutAnyOrigin],
                 output: LayoutTensor[ftype, layout_output, MutAnyOrigin]) -> None:
 
-    dotProductTiledVectorizedParallelized(input, weights, output)
-    for 
+    dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
+
+    @parameter
+    for i in range(output.shape[0]()):
+        for j in range(output.shape[1]()):
+            output[i, j] += biases[j]
 
 fn dotProductTiledVectorizedParallelized[layout_a: Layout,
                                    layout_b: Layout,
@@ -51,7 +55,7 @@ fn dotProductTiledVectorizedParallelized[layout_a: Layout,
         var ci = tid // num_tiles_n
         var cj = tid %  num_tiles_n
         
-        var c_tile = c.tile[tile_size, tile_size](ci, cj).fill(bias)
+        var c_tile = c.tile[tile_size, tile_size](ci, cj).fill(0.0)
         
         for k in range(L // tile_size):
             var a_tile = a.tile[tile_size, tile_size](ci, k)
@@ -98,6 +102,7 @@ fn dotProductSlices[layout_a: Layout,
     Vectorized / faster than naive.
     Use tiled version when available.
     """
+
     comptime rows = a.shape[0]()   # seq_len
     comptime inner = a.shape[1]()  # d_model == b.shape[0]()
     comptime cols = b.shape[1]()   # d_k or d_v
@@ -131,7 +136,7 @@ fn naiveSoftmax[layout: Layout](mut x: LayoutTensor[ftype, layout, MutAnyOrigin]
     for i in range(rows):
         var max_val: sftype = rebind[sftype](x[i, 0])
         for j in range(1, cols):
-            if x[b, i, j] > max_val:
+            if x[i, j] > max_val:
                 max_val = rebind[sftype](x[i, j])
 
         var sum_exp: sftype = 0
@@ -143,17 +148,17 @@ fn naiveSoftmax[layout: Layout](mut x: LayoutTensor[ftype, layout, MutAnyOrigin]
         for j in range(cols):
             x[i, j] /= sum_exp
 
-fn layerNorm[layout0: Layout,
-             layout1: Layout](
-                x: LayoutTensor[ftype, layout0, MutAnyOrigin],
-                gamma: LayoutTensor[ftype, layout1],
-                beta: LayoutTensor[ftype, layout1]) -> None:
+fn layerNorm[layout_input: Layout,
+             layout_gamma: Layout,
+             layout_beta: Layout,
+             layout_output: Layout](
+                x: LayoutTensor[ftype, layout_input, MutAnyOrigin],
+                gamma: LayoutTensor[ftype, layout_gamma, MutAnyOrigin],
+                beta: LayoutTensor[ftype, layout_beta, MutAnyOrigin],
+                output: LayoutTensor[ftype, layout_output, MutAnyOrigin]) -> None:
     """
     For a tensor of shape (seq_len, d_model),
     this normalizes each d_model separately.
-    Takes in a single input 'x' from the batch and has
-    a shape of (seq_len, d_model).
-    MODIFIES 'x' in-place.
     """
     comptime seq_len = x.shape[0]()
     comptime d_model = x.shape[1]()
@@ -177,54 +182,33 @@ fn layerNorm[layout0: Layout,
         var std_dev = sqrt(variance + epsilon)
         for i in range(d_model):
             var normed = (x[sl, i] - mean) / std_dev
-            x[sl, i] = gamma[i] * normed + beta[i]
+            output[sl, i] = gamma[i] * normed + beta[i]
 
-fn feedForward[layout0: Layout,
-               layout1: Layout,
-               layout2: Layout,
+fn feedForward[layout_x: Layout,
+               layout_w0: Layout,
+               layout_b0: Layout,
+               layout_w1: Layout,
+               layout_b1: Layout,
+               layout_hidden: Layout,
                act_fn: ActivationFunction = ReLU](
-                x: LayoutTensor[ftype, layout0, MutAnyOrigin],
-                w0: LayoutTensor[ftype, layout1, MutAnyOrigin],
-                b0: LayoutTensor[ftype, layout1, MutAnyOrigin],
-                w1: LayoutTensor[ftype, layout2, MutAnyOrigin],
-                b1: LayoutTensor[ftype, layout2, MutAnyOrigin],
-                hidden: LayoutTensor[ftype, layout3, MutAnyOrigin], # internal buffer
-                mut output: LayoutTensor[ftype, layout0, MutAnyOrigin]):
+                x: LayoutTensor[ftype, layout_x, MutAnyOrigin],
+                w0: LayoutTensor[ftype, layout_w0, MutAnyOrigin],
+                b0: LayoutTensor[ftype, layout_b0, MutAnyOrigin],
+                w1: LayoutTensor[ftype, layout_w1, MutAnyOrigin],
+                b1: LayoutTensor[ftype, layout_b1, MutAnyOrigin],
+                hidden: LayoutTensor[ftype, layout_hidden, MutAnyOrigin], # internal buffer
+                mut output: LayoutTensor[ftype, layout_x, MutAnyOrigin]):
     """
-    No batching here - while we're just on CPU we'll handle that elsewhere.
-    General batched form (Claude Sonnet 4.5):
-    Input: x_normalized with shape (batch, seq_len, d_model)
-        ↓
-    Linear 1: matmul with W1 of shape (d_model, d_ff)  where d_ff = 4 * d_model
-        → output shape: (batch, seq_len, d_ff)
-        ↓
-    Activation (GELU or ReLU) - applied element-wise
-        → output shape: (batch, seq_len, d_ff)
-        ↓
-    Linear 2: matmul with W2 of shape (d_ff, d_model)
-        → output shape: (batch, seq_len, d_model)
-    Output is modified in-place.
+    Linear layers where the middle / hidden
+    buffer is of a higher dimension, d_ff.
     """
-    #comptime seq_len = x.shape[0]()
-    #comptime d_model = x.shape[1]()
-    #comptime d_ff = w0.shape[1]() # == w1.shape[0]()
-    #comptime hidden_layout = Layout.row_major(seq_len, d_ff)
-
-    #var hidden_storage = alloc[sftype](hidden_layout.size()) # could use heap
-    #var hidden = LayoutTensor[ftype, hidden_layout, MutAnyOrigin].stack_allocation()
-    #dotProductSlices(x, w0, hidden) # c = a*b
     dotProductTiledVectorizedParallelized(x, w0, hidden)
-    hidden += b0
+    weightAndBias(x, w0, b0, hidden)
     act_fn.forward(hidden)
-    #dotProductSlices(hidden, w1, output)
-    dotProductTiledVectorizedParallelized(hidden, w1, output)
-    output += b1
+    weightAndBias(hidden, w1, b1, output)
 
 @always_inline("nodebug")
 fn layoutTensorDataTranspose2D[rows: Int, cols: Int](tensor: LayoutTensor[ftype, Layout.row_major(rows, cols), MutAnyOrigin]) -> LayoutTensor[ftype, Layout.row_major(cols, rows), MutAnyOrigin]:
-    #comptime rows = tensor.shape[0]()
-    #comptime cols = tensor.shape[1]()
-
     #var output_buffer = alloc[sftype](rows * cols)
     # stack allocation okay because inlined (why do i feel uneasy)
     var output = LayoutTensor[ftype, Layout.row_major(cols, rows), MutAnyOrigin].stack_allocation()
@@ -240,23 +224,23 @@ fn naiveAttention[layout0: Layout,
                           Q: LayoutTensor[ftype, layout0, MutAnyOrigin],
                           K: LayoutTensor[ftype, layout0, MutAnyOrigin],
                           V: LayoutTensor[ftype, layout1, MutAnyOrigin],
-                          scores: LayoutTensor[ftype, layout3, MutAnyOrigin],
-                          mut output: LayoutTensor[ftype, layout2]) -> None:
-    comptime seq_len = Q.shape[0]()
+                          mut scores: LayoutTensor[ftype, layout2, MutAnyOrigin],
+                          mut scores_probs: LayoutTensor[ftype, layout2, MutAnyOrigin],
+                          output: LayoutTensor[ftype, layout3, MutAnyOrigin]) -> None:
     comptime d_k = Q.shape[1]()
-    comptime d_v = V.shape[2]()
-
-    #comptime scores_layout = Layout.row_major(seq_len, seq_len)
-    #var scores_buffer = alloc[sftype](scores_layout.size())
-    #var scores = LayoutTensor[ftype, scores_layout, MutAnyOrigin].stack_allocation()#(scores_buffer)
-    
-    #dotProductSlices(Q, K, scores)
-    dotProductTiledVectorizedParallelized(Q, K, scores)
+    # modifes scores in-place
+    #var KT = layoutTensorDataTranspose2D[K.shape[0](), K.shape[1]()](K)
+    var KT = LayoutTensor[ftype, K.layout.transpose(), MutAnyOrigin](InlineArray[sftype, K.layout.size()](fill = 0.0))
+    KT.copy_from(K)
+    dotProductTiledVectorizedParallelized(Q, KT, scores)
     scores = scores / sqrt(d_k)
-    naiveSoftmax(scores)
+    scores_probs.copy_from(scores)
+    # modifies scores_probs in-place
+    naiveSoftmax(scores_probs)
 
-    #dotProductSlices(scores, V, output)
-    dotProductTiledVectorizedParallelized(scores, V, output)
+    # modifies output in-place
+    dotProductTiledVectorizedParallelized(scores_probs, V, output)
+
     # AT A HIGH LEVEL THIS PERFORMED:
     #var scores = Q @ KT / sqrt(d_k)
     #var atten = softmax(scores)
