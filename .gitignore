@@ -1,3 +1,7 @@
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+out.perf
+out.folded
+flamegraph*

@@ -1,5 +1,5 @@
 from sys.info import simd_byte_width, num_logical_cores, simd_width_of
-from compile.reflection import get_linkage_name
+from reflection import get_linkage_name
 from layout import Layout, LayoutTensor
 from random import randn#, seed
 from memory import memset, memset_zero
@@ -43,10 +43,10 @@ fn systemInfo[ftype: DType]():
           "\n\tSIMD byte width:\t" + String(simd_byte_width()) +
           "\n\tSIMD" + String(ftype) + "width:\t" + String(nelts) + '\n')
     
-fn compareBuffers[sftype: AnyType](a: UnsafePointer[sftype], b: UnsafePointer[sftype], length: Int) -> Bool:
+fn compareBuffers(a: UnsafePointer[Scalar[ftype]], b: UnsafePointer[sftype], length: Int) -> Bool:
     comptime epsilon = 1e-6
     for i in range(length):
-        if (a[i] < b[i] - epsilon) or (a[i] > b[i] + epsilon):
+        if (a[i] < (b[i] - epsilon)) or (a[i] > (b[i] + epsilon)):
             print("element i", i, ":", a[i], "!=", b[i])
             return False
     return True
