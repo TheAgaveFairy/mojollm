@@ -7,7 +7,7 @@ from sys.info import (
     simd_width_of,
     num_logical_cores,
 )  # sizeof moved
-from sys import stderr, is_big_endian
+from sys import stderr, is_big_endian, argv
 from utils.index import IndexList
 import os
 from memory import memcpy, memset, memset_zero
@@ -89,13 +89,21 @@ struct ASCIITokenizer(Copyable, Movable):
     var vocab_size: Int
     var special_tokens: List[String]
 
-    # TODO: should i make this explicitly [U]Int64 based?
-    
     fn __init__(out self, desired_vocab_size: Int):
         var safe_desired_vocab_size = max(desired_vocab_size, 256)
         self.vocab_size = safe_desired_vocab_size # we'll BPE up to this number
         self.vocab_encode = type_of(self.vocab_encode)()
         self.special_tokens = type_of(self.special_tokens)()
+    
+    fn exportVocab(self) -> String:
+        """
+        For use with Claude 4.5's tsx visualizer.
+        """
+        var result = ""
+        for i in range(len(self.vocab_encode)):
+            var pair = self.vocab_encode[i]
+            result += "{}: ({}, {})\n".format(256 + i, pair.a, pair.b)
+        return result
 
     fn save(self, filename: String) raises:
         try:
@@ -305,6 +313,21 @@ struct ASCIITokenizer(Copyable, Movable):
             b = text_tokens[i + 1]
         return counts^
 
+    fn _countPairsIterativeNew(self, text_tokens: List[Int], s: Int) -> Pair:
+        var counts = List[Int](length = s * s, fill = 0)
+        var a = text_tokens[0]
+        var b = text_tokens[1]
+        var most = 0
+        var pair = Pair.DUMMY
+        for i in range(len(text_tokens) - 1):
+            counts[a * s + b] += 1
+            if counts[a * s + b] > most:
+                most = counts[a * s + b]
+                pair = Pair(a, b)
+            a = b
+            b = text_tokens[i + 1]
+        return pair
+
     fn __copyinit__(out self, other: Self):
         self.vocab_size = other.vocab_size # we'll BPE up to this number
         self.vocab_encode = other.vocab_encode.copy()
@@ -318,14 +341,26 @@ struct ASCIITokenizer(Copyable, Movable):
 
 fn main():
     # tests
+    var args = argv()
+    var vocab_size = 500
+    if len(args) > 1:
+        try:
+            vocab_size = Int(args[1])
+        except e:
+            print(e, file = stderr)
+            return
+    
     try:
         with open("./datasets/input.txt", "r") as f:
             var text = f.read()
 
-            var tokenizer = ASCIITokenizer(1000) # 280 is enough to display recursion
-            var tok_multi = ASCIITokenizer(1000)
+            #var tokenizer = ASCIITokenizer(vocab_size) # 280 is enough to display recursion
+            #tokenizer.train(text)
             
-            comptime runs = 7
+            _ = """
+            var tok_multi = ASCIITokenizer(vocab_size)
+            
+            comptime runs = 1
             for r in range(runs):
                 var start = perf_counter_ns()
                 tokenizer.train(text)
@@ -345,16 +380,18 @@ fn main():
                 print(seen == n, ", single is", multi_ms / single_ms, "times faster.")
 
             _ = """
-            var encoded = tokenizer.encode(text)
-            var decoded = tokenizer.decode(encoded)
+            #var encoded = tokenizer.encode(text)
+            #var decoded = tokenizer.decode(encoded)
 
-            print("Encode -> Decode reverts to original?:", decoded == text)
-            comptime filename = "bpe.tok"
+            #print("Encode -> Decode reverts to original?:", decoded == text)
+            var filename = "bpe_{}.tok".format(vocab_size)
             tokenizer.save(filename)
 
             var tok2 = ASCIITokenizer.load(filename)
             print("Save / Load worked?:", tokenizer == tok2)
-            """
             benchmark.compiler.keep(tokenizer)
+            var vocab_filename = "vocab_{}.txt".format(vocab_size)
+            with open(vocab_filename, "w") as v:
+                v.write(tokenizer.exportVocab())
     except e:
         print(e)
