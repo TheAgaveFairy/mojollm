@@ -17,6 +17,9 @@ from reflection import get_linkage_name
 from compile import compile_info
 import benchmark  # run, Unit.ms
 from hashlib.hasher import Hasher, default_hasher
+from utils.lock import BlockingSpinLock
+from os.atomic import Atomic
+from collections import Set
 
 from helpers import (
     showProgress,
@@ -45,7 +48,7 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     hashing.
     """
     comptime __copyinit__is_trivial = True
-
+    comptime DUMMY = Self(-1, -1)
     comptime delimeter = '|'
 
     # data must be BIGGER than a Byte to allow for expansion
@@ -173,6 +176,67 @@ struct ASCIITokenizer(Copyable, Movable):
             ids.append(Int(b))
         return ids^
 
+    fn trainParallelized(mut self, text: StringSlice, threads: Int):
+        """
+        Currently not actually thread safe. I can't figure out how to count
+        all pairs into a global data structure without either blowing up memory
+        usage by duplicating that into local copies that then get merged,
+        or without better mutex support. For some reason, I can't make a
+        List[Atomic[DType.int32]] or something, and a spinlock would probably
+        burn too much.
+
+        However, I postulate the following:
+        Given a sufficiently large enough dataset, the number of actual
+        collisions that would happen are small or rare. Additionally, even if
+        collisions were to happen, it's highly unlikely that they would prevent
+        us from our ultimate goal: find the most common byte pair. Worst case,
+        we're probably selecting the "second place" candidate some rare number
+        of times, which seems totally fine. Encode / decode will work fine.
+
+        Therefore, we will proceed without thread safety!
+        """
+        #var threads = num_logical_cores()
+        #var lock = BlockingSpinLock()
+
+        print("Training with BPE to vocab size", self.vocab_size, " using", threads, "threads...")
+        var ids = Self.stringToTokenList(text)
+
+        var n = len(ids)
+        var toks_per_chunk = n // threads # or ceildiv(n, threads)
+
+        var num_merges = self.vocab_size - 256
+        for i in range(num_merges):
+            showProgress(i, num_merges)
+            var s = 256 + i
+            comptime itype = DType.int32
+            comptime sitype = Scalar[itype]
+            var pair_counts_global = List[sitype](length = s * s, fill = 0)
+            @parameter
+            fn parallelClosure(tid: Int):
+                var chunk_start = toks_per_chunk * tid
+                var chunk_end = min(n, toks_per_chunk * (tid + 1) + 1) # halo size of 1
+                var local_ids_slice = ids[chunk_start : chunk_end]
+                for j in range(len(local_ids_slice) - 1):
+                    var a = ids[chunk_start + j]
+                    var b = ids[chunk_start + j + 1]
+                    #pair_counts_global[a * s + b] += 1 # "should" be Atomic Add
+                    var temp_ptr = pair_counts_global.unsafe_ptr() + (a * s + b)
+                    _ = Atomic[itype].fetch_add(temp_ptr, 1)
+            parallelize[parallelClosure](threads)
+
+            var global_max_count: sitype = 0
+            var global_max_pair = Pair.DUMMY
+            for j, count in enumerate(pair_counts_global):
+                var a = j // s
+                var b = j % s
+                if count > global_max_count:
+                    global_max_count = count
+                    global_max_pair = Pair(a, b)
+
+            self.vocab_encode.append(global_max_pair)
+            ids = self._merge(ids, global_max_pair, s)
+        print()
+
     fn train(mut self, text: StringSlice):
         """
         Byte Pair Encoding.
@@ -184,10 +248,10 @@ struct ASCIITokenizer(Copyable, Movable):
         for i in range(num_merges):
             showProgress(i, num_merges)
             var most_common_pair_count = 0
-            var most_common_pair = Pair(-1, -1) # dummy values
+            var most_common_pair = Pair.DUMMY # dummy values
 
             var s = 256 + i
-            var pair_counts = self._countPairsIterativeNew(ids, s) # returns an 's' x 's' "matrix"
+            var pair_counts = self._countPairsIterative(ids, s) # returns an 's' x 's' "matrix"
             for j, count in enumerate(pair_counts):
                 var a = j // s
                 var b = j % s
@@ -213,9 +277,14 @@ struct ASCIITokenizer(Copyable, Movable):
         var n = len(text_tokens)
         var merged = List[Int](capacity = n)
 
+        var c = pair.a
+        var d = pair.b
+
         var i = 0
         while i < n:
-            if i < n - 1 and Pair(text_tokens[i], text_tokens[i + 1]) == pair:
+            var a = text_tokens[i]
+            var b = text_tokens[i + 1]
+            if i < n - 1 and (a == c and b == d):
                 merged.append(token_id)
                 i += 2
             else:
@@ -224,12 +293,16 @@ struct ASCIITokenizer(Copyable, Movable):
         
         return merged^
 
-    fn _countPairsIterativeNew(self, text_tokens: List[Int], s: Int) -> List[Int]:
+    fn _countPairsIterative(self, text_tokens: List[Int], s: Int) -> List[Int]:
         var counts = List[Int](length = s * s, fill = 0)
+        var a = text_tokens[0]
+        var b = text_tokens[1]
         for i in range(len(text_tokens) - 1):
-            var a = text_tokens[i]
-            var b = text_tokens[i + 1]
+            #var a = text_tokens[i]
+            #var b = text_tokens[i + 1]
             counts[a * s + b] += 1
+            a = b
+            b = text_tokens[i + 1]
         return counts^
 
     fn __copyinit__(out self, other: Self):
@@ -249,9 +322,29 @@ fn main():
         with open("./datasets/input.txt", "r") as f:
             var text = f.read()
 
-            var tokenizer = ASCIITokenizer(500) # 280 is enough to display recursion
-            tokenizer.train(text)
+            var tokenizer = ASCIITokenizer(1000) # 280 is enough to display recursion
+            var tok_multi = ASCIITokenizer(1000)
+            
+            comptime runs = 1
+            for r in range(runs):
+                var start = perf_counter_ns()
+                tokenizer.train(text)
+                var mid = perf_counter_ns()
+                tok_multi.trainParallelized(text, num_logical_cores())
+                var end = perf_counter_ns()
 
+                var verify = Set[Pair](tokenizer.vocab_encode)
+                var n = len(tokenizer.vocab_encode) # vocab_size - 256
+                var seen = 0
+                for i in range(n):
+                    if tok_multi.vocab_encode[i] in verify:
+                        seen += 1
+                
+                var single_ms = (mid - start) // 1_000_000
+                var multi_ms = (end - mid) // 1_000_000
+                print("Multi contains ", round(seen / n, 3) * 100, "% of the trusted set.\n\tSingle is", multi_ms / single_ms, "times faster.")
+
+            _ = """
             var encoded = tokenizer.encode(text)
             var decoded = tokenizer.decode(encoded)
 
@@ -261,6 +354,7 @@ fn main():
 
             var tok2 = ASCIITokenizer.load(filename)
             print("Save / Load worked?:", tokenizer == tok2)
-            
+            """
+            benchmark.compiler.keep(tokenizer)
     except e:
         print(e)
