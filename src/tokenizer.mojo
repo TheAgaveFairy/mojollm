@@ -325,7 +325,7 @@ fn main():
             var tokenizer = ASCIITokenizer(1000) # 280 is enough to display recursion
             var tok_multi = ASCIITokenizer(1000)
             
-            comptime runs = 1
+            comptime runs = 7
             for r in range(runs):
                 var start = perf_counter_ns()
                 tokenizer.train(text)
@@ -342,7 +342,7 @@ fn main():
                 
                 var single_ms = (mid - start) // 1_000_000
                 var multi_ms = (end - mid) // 1_000_000
-                print("Multi contains ", round(seen / n, 3) * 100, "% of the trusted set.\n\tSingle is", multi_ms / single_ms, "times faster.")
+                print(seen == n, ", single is", multi_ms / single_ms, "times faster.")
 
             _ = """
             var encoded = tokenizer.encode(text)
