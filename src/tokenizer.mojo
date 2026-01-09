@@ -227,6 +227,8 @@ struct ASCIITokenizer(Copyable, Movable):
                 chunks.append(chunk^)
                 i += 1
         
+        #for chunk in chunks[:100]:
+        #    print(chunk)
         return chunks^
 
     @staticmethod
@@ -287,20 +289,17 @@ struct ASCIITokenizer(Copyable, Movable):
         """
         print("Training with BPE to vocab size", self.vocab_size, "...")
         var raw_ids: List[Int] = Self.stringToTokenList(text)
+        var ids: List[List[Int]] = Self.boundaryProtect(raw_ids)
 
         var num_merges = self.vocab_size - 256
         for i in range(num_merges):
             showProgress(i, num_merges)
 
-            var ids: List[List[Int]] = Self.boundaryProtect(raw_ids)
-            #print("IDS as chunks", ids)
-            #print()
             var most_common_pair_count = 0
             var most_common_pair = Pair.DUMMY # dummy values
 
             var s = 256 + i
             var pair_counts = self._countPairsChunks(ids, s) # returns an 's' x 's' "matrix"
-            #print("Pair Counts", pair_counts)
             for j, count in enumerate(pair_counts):
                 var a = j // s
                 var b = j % s
@@ -310,11 +309,14 @@ struct ASCIITokenizer(Copyable, Movable):
                     var pair = Pair(a, b)
                     most_common_pair = pair
 
-            #print("MOST COMMON PAIR", String(256 + i), ":", most_common_pair.__repr__(), most_common_pair_count)
             self.vocab_encode.append(most_common_pair)
-            raw_ids = [x for chunk in ids for x in chunk]
-            raw_ids = self._merge(raw_ids, most_common_pair, s)
-            #print("raw_ids", raw_ids)
+            ids = self._mergeChunks(ids, most_common_pair, s)
+            _ = """
+            print("IDS")
+            for id in ids[:100]:
+                print(id, end = " ")
+            print("\n\n")
+            """
         print()
 
     fn encode(self, text: StringSlice) -> List[Int]:
@@ -340,10 +342,11 @@ struct ASCIITokenizer(Copyable, Movable):
 
         return String(bytes = bytes)
     
-    fn exportVocab(self, filename: String) -> String:
+    fn exportVocab(self, filename: String):
         """
         For use with Claude 4.5's tsx visualizer.
         """
+        print("Exporting vocab for visualizer:", filename)
         try:
             with open(filename, "w") as f:
                 var result = ""
@@ -351,10 +354,8 @@ struct ASCIITokenizer(Copyable, Movable):
                     var pair = self.vocab_encode[i]
                     result += "{}: ({}, {})\n".format(256 + i, pair.a, pair.b)
                 f.write(result)
-                return result
         except e:
             print(e, file = stderr)
-            return ""
 
     fn save(self, filename: String) raises:
         """
@@ -451,22 +452,7 @@ struct ASCIITokenizer(Copyable, Movable):
     @deprecated("use train(), this doesn't implement 'regexp' boundary protection and offers no real performance gain")
     fn trainParallelized(mut self, text: StringSlice, threads: Int = num_logical_cores()):
         """
-        Currently not actually thread safe. I can't figure out how to count
-        all pairs into a global data structure without either blowing up memory
-        usage by duplicating that into local copies that then get merged,
-        or without better mutex support. For some reason, I can't make a
-        List[Atomic[DType.int32]] or something, and a spinlock would probably
-        burn too much.
-
-        However, I postulate the following:
-        Given a sufficiently large enough dataset, the number of actual
-        collisions that would happen are small or rare. Additionally, even if
-        collisions were to happen, it's highly unlikely that they would prevent
-        us from our ultimate goal: find the most common byte pair. Worst case,
-        we're probably selecting the "second place" candidate some rare number
-        of times, which seems totally fine. Encode / decode will work fine.
-
-        Therefore, we will proceed without thread safety!
+        Not actually much faster - abandoned.
         """
         print("Training with BPE to vocab size", self.vocab_size, " using", threads, "threads...")
         var ids = Self.stringToTokenList(text)
@@ -510,10 +496,6 @@ struct ASCIITokenizer(Copyable, Movable):
     fn _merge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
         """
         We take in a read-only list of token ids and allocate new fresh memory.
-        We know that the list will be shorter after merging, so we can know
-        that pre-allocating memory at the same size as the incoming "text" will
-        always work.
-        This is "good enough" for our needs. This isn't a bottleneck.
         """
         var n = len(text_tokens)
         var merged = List[Int](capacity = n)
@@ -534,6 +516,34 @@ struct ASCIITokenizer(Copyable, Movable):
         
         return merged^
 
+    fn _mergeChunks(self, chunks: List[List[Int]], pair: Pair, new_token_id: Int) -> List[List[Int]]:
+        """
+        We take in a read-only list of token ids and allocate new fresh memory.
+        """
+        var n = len(chunks)
+        var merged = List[List[Int]](capacity = n)
+
+        var c = pair.a
+        var d = pair.b
+
+        for chunk in chunks:
+            var m = len(chunk)
+            var temp = List[Int]()
+            var i = 0
+            while i + 1 < m:
+                var a = chunk[i]
+                var b = chunk[i + 1]
+                if a == c and b == d:
+                    temp.append(new_token_id)
+                    i += 2
+                else:
+                    temp.append(chunk[i])
+                    i += 1
+            if i < m:
+                temp.append(chunk[i])
+            merged.append(temp^)
+        
+        return merged^
     fn _countPairsChunks(self, chunks: List[List[Int]], s: Int) -> List[Int]:
         """
         For this Shakespeare dataset, the max counted pair is seen 27643 times.
@@ -601,7 +611,7 @@ fn main():
             var tokenizer = ASCIITokenizer(config.vocab_size) # ~280 is enough to display recursion
             tokenizer.trainWithProtections(text)
             print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
-            print(showExample(tokenizer, tokenizer.encode(text[:500])))
+            #print(showExample(tokenizer, tokenizer.encode(text[:500])))
             tokenizer.save(config.save_name)
 
             var vocab_filename = "models/vocab_{}.txt".format(config.vocab_size)

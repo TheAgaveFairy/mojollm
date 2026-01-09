@@ -24,16 +24,23 @@ fn cleanFunctionName[func: fn() -> None]() -> String:
     func_name = func_name.split('[')[0].split('::')[1]
     return func_name
 
-fn showProgress(progress: Int, total: Int) -> None:
+fn showProgress(progress: Int, total: Int):
     comptime bar_width = 50
-    var ratio = progress / total
-    var filled = Int(bar_width * ratio)
-    print("\r[", end="")
-    for _ in range(filled):
-        print("=", end="")
-    for _ in range(filled, bar_width):
-        print(" ", end="")
-    print("]", round(ratio * 100, 3), "%", end="")
+
+    if progress == (total - 1):
+        print("\r[", end="")
+        for _ in range(bar_width):
+            print("=", end="")
+        print("] TASK COMPLETE!")
+    else:
+        var ratio = progress / total
+        var filled = Int(bar_width * ratio)
+        print("\r[", end="")
+        for _ in range(filled):
+            print("=", end="")
+        for _ in range(filled, bar_width):
+            print(" ", end="")
+        print("]", round(ratio * 100, 1), "%", end="")
 
 fn systemInfo[ftype: DType]():
     comptime nelts = simd_width_of[ftype]()

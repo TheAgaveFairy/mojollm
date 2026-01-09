@@ -25,7 +25,7 @@ struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Represen
         var args = argv()
         # defaults
         self.vocab_size = 5000
-        self.input_filename = "./datasets/input.txt"
+        self.input_filename = "./datasets/shakespeare.txt"
         self.save_name = Self.DUMMY
         self.had_error = False
 
