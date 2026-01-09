@@ -5,3 +5,5 @@
 out.perf
 out.folded
 flamegraph*
+
+models/

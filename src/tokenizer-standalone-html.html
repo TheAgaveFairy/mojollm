@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BPE Tokenizer Visualizer</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState } = React;
+        
+        // Lucide icons as SVG components
+        const Upload = () => (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+            </svg>
+        );
+        
+        const Hash = () => (
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/>
+                <line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>
+            </svg>
+        );
+        
+        const FileText = () => (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
+            </svg>
+        );
+
+        const TokenizerVisualizer = () => {
+            const [inputText, setInputText] = useState("don't stop believing");
+            const [vocabFile, setVocabFile] = useState(null);
+            const [vocab, setVocab] = useState([]);
+            const [tokens, setTokens] = useState([]);
+            const [tokenIds, setTokenIds] = useState([]);
+
+            const getTokenColor = (tokenId) => {
+                const colors = [
+                    'bg-blue-100 border-blue-300',
+                    'bg-green-100 border-green-300',
+                    'bg-yellow-100 border-yellow-300',
+                    'bg-purple-100 border-purple-300',
+                    'bg-pink-100 border-pink-300',
+                    'bg-indigo-100 border-indigo-300',
+                    'bg-red-100 border-red-300',
+                    'bg-orange-100 border-orange-300',
+                    'bg-teal-100 border-teal-300',
+                    'bg-cyan-100 border-cyan-300',
+                ];
+                return colors[tokenId % colors.length];
+            };
+
+            const handleVocabUpload = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const text = await file.text();
+                const lines = text.trim().split('\n');
+                const parsedVocab = [];
+
+                for (const line of lines) {
+                    const match = line.match(/(\d+):\s*\((\d+),\s*(\d+)\)/);
+                    if (match) {
+                        const [_, id, a, b] = match;
+                        parsedVocab.push({
+                            id: parseInt(id),
+                            pair: [parseInt(a), parseInt(b)]
+                        });
+                    }
+                }
+
+                setVocab(parsedVocab);
+                setVocabFile(file.name);
+                
+                if (inputText) {
+                    encodeText(inputText, parsedVocab);
+                }
+            };
+
+            const encodeText = (text, vocabulary) => {
+                if (!text) {
+                    setTokens([]);
+                    setTokenIds([]);
+                    return;
+                }
+
+                let ids = [];
+                for (let i = 0; i < text.length; i++) {
+                    ids.push(text.charCodeAt(i));
+                }
+
+                for (const vocabEntry of vocabulary) {
+                    const { id, pair } = vocabEntry;
+                    const [a, b] = pair;
+                    
+                    let i = 0;
+                    while (i < ids.length - 1) {
+                        if (ids[i] === a && ids[i + 1] === b) {
+                            ids.splice(i, 2, id);
+                        } else {
+                            i++;
+                        }
+                    }
+                }
+
+                const decodedTokens = ids.map(id => decodeToken(id, vocabulary));
+                
+                setTokenIds(ids);
+                setTokens(decodedTokens);
+            };
+
+            const decodeToken = (tokenId, vocabulary) => {
+                if (tokenId < 256) {
+                    return String.fromCharCode(tokenId);
+                }
+
+                const vocabEntry = vocabulary.find(v => v.id === tokenId);
+                if (!vocabEntry) return '?';
+
+                const [a, b] = vocabEntry.pair;
+                return decodeToken(a, vocabulary) + decodeToken(b, vocabulary);
+            };
+
+            const handleTextChange = (e) => {
+                const text = e.target.value;
+                setInputText(text);
+                if (vocab.length > 0) {
+                    encodeText(text, vocab);
+                }
+            };
+
+            const useSampleVocab = () => {
+                const sample = [
+                    { id: 256, pair: [32, 116] },
+                    { id: 257, pair: [101, 108] },
+                    { id: 258, pair: [105, 110] },
+                    { id: 259, pair: [100, 111] },
+                    { id: 260, pair: [259, 110] },
+                ];
+                setVocab(sample);
+                setVocabFile("sample.vocab");
+                encodeText(inputText, sample);
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
+                    <div className="max-w-5xl mx-auto">
+                        <div className="bg-white rounded-lg shadow-lg p-8">
+                            <h1 className="text-3xl font-bold text-slate-800 mb-2 flex items-center gap-3">
+                                <Hash />
+                                BPE Tokenizer Visualizer
+                            </h1>
+                            <p className="text-slate-600 mb-6">
+                                Visualize how your Byte Pair Encoding tokenizer splits text into tokens
+                            </p>
+
+                            <div className="mb-6 p-4 bg-slate-50 rounded-lg border-2 border-dashed border-slate-300">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <Upload />
+                                    <span className="text-slate-700 font-medium">
+                                        {vocabFile ? `Loaded: ${vocabFile}` : 'Upload Vocabulary File'}
+                                    </span>
+                                    <input
+                                        type="file"
+                                        accept=".txt,.vocab"
+                                        onChange={handleVocabUpload}
+                                        className="hidden"
+                                    />
+                                </label>
+                                <p className="text-sm text-slate-500 mt-2">
+                                    Expected format: One line per merge, e.g., "256: (104, 101)"
+                                </p>
+                                <button
+                                    onClick={useSampleVocab}
+                                    className="mt-3 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                                >
+                                    Use Sample Vocab
+                                </button>
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="block text-sm font-medium text-slate-700 mb-2">
+                                    Input Text
+                                </label>
+                                <textarea
+                                    value={inputText}
+                                    onChange={handleTextChange}
+                                    placeholder="Type or paste text here..."
+                                    className="w-full p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm"
+                                    rows={4}
+                                />
+                            </div>
+
+                            {tokens.length > 0 && (
+                                <div className="grid grid-cols-3 gap-4 mb-6">
+                                    <div className="bg-blue-50 p-4 rounded-lg">
+                                        <div className="text-sm text-blue-600 font-medium">Characters</div>
+                                        <div className="text-2xl font-bold text-blue-900">{inputText.length}</div>
+                                    </div>
+                                    <div className="bg-green-50 p-4 rounded-lg">
+                                        <div className="text-sm text-green-600 font-medium">Tokens</div>
+                                        <div className="text-2xl font-bold text-green-900">{tokens.length}</div>
+                                    </div>
+                                    <div className="bg-purple-50 p-4 rounded-lg">
+                                        <div className="text-sm text-purple-600 font-medium">Compression</div>
+                                        <div className="text-2xl font-bold text-purple-900">
+                                            {((1 - tokens.length / inputText.length) * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {tokens.length > 0 && (
+                                <div className="mb-6">
+                                    <label className="block text-sm font-medium text-slate-700 mb-3">
+                                        Tokenized Output
+                                    </label>
+                                    <div className="flex flex-wrap gap-1 p-4 bg-slate-50 rounded-lg border border-slate-200 min-h-[100px]">
+                                        {tokens.map((token, idx) => (
+                                            <div
+                                                key={idx}
+                                                className={`px-2 py-1 rounded border-2 font-mono text-sm ${getTokenColor(tokenIds[idx])} 
+                                                    hover:scale-105 transition-transform cursor-pointer group relative`}
+                                                title={`Token ID: ${tokenIds[idx]}`}
+                                            >
+                                                {token === ' ' ? '·' : token}
+                                                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                                                    ID: {tokenIds[idx]}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {tokenIds.length > 0 && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-3">
+                                        Token IDs
+                                    </label>
+                                    <div className="p-4 bg-slate-900 text-green-400 rounded-lg font-mono text-sm overflow-x-auto">
+                                        [{tokenIds.join(', ')}]
+                                    </div>
+                                </div>
+                            )}
+
+                            {vocab.length > 0 && (
+                                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                                    <div className="flex items-center gap-2 text-blue-900 font-medium mb-2">
+                                        <FileText />
+                                        Vocabulary Info
+                                    </div>
+                                    <p className="text-sm text-blue-700">
+                                        Loaded {vocab.length} merge rules (vocab size: {256 + vocab.length})
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-6 bg-white rounded-lg shadow p-6">
+                            <h2 className="font-semibold text-slate-800 mb-3">How to Use</h2>
+                            <ol className="list-decimal list-inside space-y-2 text-slate-600 text-sm">
+                                <li>Export your vocab from Mojo (print vocab_encode in format: "ID: (a, b)")</li>
+                                <li>Upload the vocab file or click "Use Sample Vocab" to test</li>
+                                <li>Type or paste text to see how it gets tokenized</li>
+                                <li>Hover over tokens to see their IDs</li>
+                                <li>Watch the compression ratio to see BPE effectiveness</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<TokenizerVisualizer />, document.getElementById('root'));
+    </script>
+</body>
+</html>

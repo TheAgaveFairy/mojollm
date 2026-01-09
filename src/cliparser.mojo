@@ -4,24 +4,31 @@ from sys import stderr, argv
 struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Representable):
     comptime FLAG_HELP = "--help"
     comptime FLAG_HELP_SHORT = Self.FLAG_HELP[1:3] # -h
-    comptime FLAG_MODE = "--vocab-size"
-    comptime FLAG_MODE_SHORT = Self.FLAG_MODE[1:3] # -v
+    comptime FLAG_VOCAB = "--vocab-size"
+    comptime FLAG_VOCAB_SHORT = Self.FLAG_VOCAB[1:3] # -v
     comptime FLAG_SAVE_NAME = "--save-name"
-    comptime FLAG_SAVE_NAME_SHORT = Self.FLAG_SAVE_NAME[1:3]
-    comptime FLAG_FILENAME = "--filename"
-    comptime FLAG_FILENAME_SHORT = Self.FLAG_FILENAME[1:3] # -f
+    comptime FLAG_SAVE_NAME_SHORT = Self.FLAG_SAVE_NAME[1:3] # -s
+    comptime FLAG_INPUT_FILENAME = "--input-filename"
+    comptime FLAG_INPUT_FILENAME_SHORT = Self.FLAG_INPUT_FILENAME[1:3] # -i
 
-    var vocab_size = 256
-    var save_name = "bpe.tok"
-    var filename = "./datasets/input.txt" #: Optional[String] # for a file without the standard name
+    comptime __copyinit__is_trivial = True
+    comptime __moveinit__is_trivial = True
+
+    comptime DUMMY = "DUMMY"
+
+    var vocab_size: Int
+    var save_name: String
+    var input_filename: String
     var had_error: Bool
 
     fn __init__(out self):
         var args = argv()
         # defaults
-        self.filename = type_of(self.filename)(None)
-        self.runs = 1
+        self.vocab_size = 5000
+        self.input_filename = "./datasets/input.txt"
+        self.save_name = Self.DUMMY
         self.had_error = False
+
         var i = 1 # skip argv[0] / program name
         while i < len(args):
             arg = args[i]
@@ -29,60 +36,77 @@ struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Represen
                 Self.printHelp()
                 self.had_error = True # don't run anything
                 break
-            elif arg == materialize[Self.FLAG_MODE]() or arg == materialize[Self.FLAG_MODE_SHORT]():
-                self._parseMode(args[i + 1])
-                i += 2 # consume
-            elif arg == materialize[Self.FLAG_FILENAME]() or arg == materialize[Self.FLAG_FILENAME_SHORT]():
-                self._parseFilename(args[i + 1])
-                i += 2
-            elif arg == materialize[Self.FLAG_DAYS]() or arg == materialize[Self.FLAG_DAYS_SHORT]():
-                self._parseDays(args[i + 1])
-                i += 2
-            elif arg == materialize[Self.FLAG_RUNS]() or arg == materialize[Self.FLAG_RUNS_SHORT]():
-                self._parseRuns(args[i + 1])
-                i += 2
+            elif arg == materialize[Self.FLAG_VOCAB]() or arg == materialize[Self.FLAG_VOCAB_SHORT]():
+                if i + 1 < len(args):
+                    self._parseVocabSize(args[i + 1])
+                    i += 2 # consume
+                else:
+                    self.printBoundsError("-v")
+                    break
+            elif arg == materialize[Self.FLAG_INPUT_FILENAME]() or arg == materialize[Self.FLAG_INPUT_FILENAME_SHORT]():
+                if i + 1 < len(args):
+                    self._parseInputFilename(args[i + 1])
+                    i += 2
+                else:
+                    self.printBoundsError("-i")
+                    break
+            elif arg == materialize[Self.FLAG_SAVE_NAME]() or arg == materialize[Self.FLAG_SAVE_NAME_SHORT]():
+                if i + 1 < len(args):
+                    self._parseSaveName(args[i + 1])
+                    i += 2
+                else:
+                    self.printBoundsError("-s")
+                    break
             else:
                 print("unknown flag: " + arg, file = stderr)
                 i += 1
                 self.had_error = True
+        # have to wait for this
+        if self.save_name == Self.DUMMY:
+            self.save_name = "./models/bpe_{}.tok".format(self.vocab_size)
+
+    fn printBoundsError(mut self, text: String):
+        print("Error in args. Please try again; probably caused by a flag at the end with no following value.")
+        self.had_error = True
 
     @staticmethod
     fn printHelp():
-        var help_str = "Usage: main [OPTIONS]...\n" + \
-                "\t-m, --mode MODE\tMODE is 'full', 'test', or 'both'. case-insensitive. default = 'full'\n" + \
-                "\t-f, --filename FILENAME\ta custom input file for use with a single day. default = None and uses 'mode' implication\n" + \
-                "\t-d, --days DAYS\twhere DAYS is csv. e.g. '1', '1,2,3', '7,6,9'. defaults to AoC schedule using 'date' during event or all days otherwise\n" + \
-                "\t-r, --runs RUNS\tthe number of runs to run for benchmarking. default = 1.\n" + \
-                "\n\tEXAMPLE: 'main -m both -d 7,8 -r 100' would run both test and full inputs for days 7 and 8 100 times each (400 total runs)"
+        var help_str = "Usage: ./tokenizer [OPTIONS]...\n" + \
+                "\t-i, --input-filename FILENAME\ta custom input file. default = ./datasets/input.txt\n" + \
+                "\t-s, --save-name FILENAME\twhat name we will save the tokenizer to. default = bpe_VOCAB_SIZE.tok.\n" + \
+                "\t-v, --vocab_size VOCAB_SIZE\tdefault = 5000.\n"
         print(help_str)
 
-    fn _parseFilename(mut self, filename: StringSlice):
-        if filename[:2] == "--":
-            print("please include the filename", file = stderr)
+    fn _parseInputFilename(mut self, filename: StringSlice):
+        if filename[:1] == "-":
+            print("please include the input filename", file = stderr)
             self.had_error = True
         else:
-            self.filename = String(filename)
+            self.input_filename = String(filename)
 
-    fn __copyinit__(out self, other: Self):
-        self.days = other.days.copy()
-        self.mode = other.mode
-        self.filename = other.filename
-        self.runs = other.runs
-        self.had_error = other.had_error
+    fn _parseSaveName(mut self, filename: StringSlice):
+        if filename[:1] == "-":
+            print("please include the save filename", file = stderr)
+            self.had_error = True
+        else:
+            self.save_name = String(filename)
 
-    fn __moveinit__(out self, deinit existing: Self):
-        self.days = existing.days^
-        self.mode = existing.mode^
-        self.filename = existing.filename^
-        self.runs = existing.runs
-        self.had_error = existing.had_error
+    fn _parseVocabSize(mut self, vocab_size: StringSlice):
+        if vocab_size[:1] == "-":
+            print("please include the save filename", file = stderr)
+            self.had_error = True
+        else:
+            try:
+                self.vocab_size = Int(vocab_size)
+            except e:
+                print(e, file = stderr)
+                self.had_error = True
 
     fn __str__(self) -> String:
         return "CLIParser:" + \
-                "\nDays: " + String(self.days) + \
-                "\nMode: " + self.mode + \
-                "\nFilename: " + String(self.filename) + \
-                "\nRuns: " + String(self.runs) + \
+                "\nVocab Size: " + String(self.vocab_size) + \
+                "\nSave Name: " + self.save_name + \
+                "\nInput Filename: " + String(self.input_filename) + \
                 "\nHad Error: " + String(self.had_error)
     fn __repr__(self) -> String:
         return self.__str__()
@@ -90,5 +114,5 @@ struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Represen
         writer.write_bytes(self.__str__().as_bytes())
 
 fn main():
-    var parser = CLIParser()
+    var parser = TokenizerParser()
     print(parser)
