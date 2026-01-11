@@ -41,11 +41,12 @@ comptime ftype = DType.float32
 comptime sftype = Scalar[ftype]  # 's' prefix = 'S'calar
 comptime nelts = simd_width_of[ftype]()
 
+# token IDs stored as:
+comptime token_itype = DType.uint16
 
 struct ModelParams:
     comptime num_transformer_blocks = 1 << 2
-
-    comptime vocab_size = 1 << 8
+    comptime vocab_size = 1 << 10
 
     comptime max_batch_size = 1 << 5  # hmm
     comptime seq_len = 1 << 3
@@ -69,6 +70,52 @@ trait Weights(Defaultable):
     # fn saveToFile(self):
     #    pass
 
+struct EmbeddingWeights(Copyable, Weights):
+    comptime __copyinit__is_trivial = True
+    comptime __moveinit__is_trivial = True
+
+    comptime token_embeddings_layout = Layout.row_major(ModelParams.vocab_size, ModelParams.d_model)
+    comptime position_embeddings_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_model)
+    var token_embeddings: LayoutTensor[ftype, Self.token_embeddings_layout, MutAnyOrigin]
+    var position_embeddings: LayoutTensor[ftype, Self.position_embeddings_layout, MutAnyOrigin]
+
+    var token_embeddings_grad: LayoutTensor[ftype, Self.token_embeddings_layout, MutAnyOrigin]
+    var position_embeddings_grad: LayoutTensor[ftype, Self.position_embeddings_layout, MutAnyOrigin]
+
+    @always_inline("nodebug")
+    fn embedTokens(self, token_ids: List[Int], mut X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]):
+        """
+        Helper function for the forward pass of my LLM. The rebinds etc are
+        just a bit much, and I'd prefer that forward to abstract away the
+        deepest of tedium, at least for now.
+        """
+        comptime d_model_slice = Slice(0, ModelParams.d_model)
+        for i in range(ModelParams.seq_len):
+            var tok_emb = self.token_embeddings.slice_1d[d_model_slice, IndexList[1](1)]([token_ids[i]])
+            var pos_emb = self.position_embeddings.slice_1d[d_model_slice, IndexList[1](1)](IndexList[1](i))
+
+            var output_slice = X.slice_1d[d_model_slice, IndexList[1](1)](IndexList[1](i))
+            output_slice += tok_emb
+            output_slice += pos_emb
+
+    fn __init__(out self):
+        self.token_embeddings = type_of(self.token_embeddings)(alloc[sftype](Self.token_embeddings_layout.size())).fill(0.0)
+        self.position_embeddings = type_of(self.position_embeddings)(alloc[sftype](Self.position_embeddings_layout.size())).fill(0.0)
+        self.token_embeddings_grad = type_of(self.token_embeddings_grad)(alloc[sftype](Self.token_embeddings_layout.size())).fill(0.0)
+        self.position_embeddings_grad = type_of(self.position_embeddings_grad)(alloc[sftype](Self.position_embeddings_layout.size())).fill(0.0)
+
+    @staticmethod
+    fn initRandom(out self: Self):
+        self = Self()
+        fillTensorRand(self.token_embeddings)
+        fillTensorRand(self.position_embeddings)
+
+    fn __del__(deinit self):
+        print("EmbeddingWeights __del__()")
+        self.token_embeddings.ptr.free()
+        self.position_embeddings.ptr.free()
+        self.token_embeddings_grad.ptr.free()
+        self.position_embeddings_grad.ptr.free()
 
 struct AttentionWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
@@ -173,7 +220,6 @@ struct FFWeights(Copyable, Movable, Weights):
         self.w1.ptr.free()
         self.b1.ptr.free()
 
-
 struct LayerNormWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
@@ -199,7 +245,6 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         print("LayerNormWeights __del__()")
         self.gamma.ptr.free()
         self.beta.ptr.free()
-
 
 struct OutputWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
@@ -274,6 +319,7 @@ struct TransformerBlock(
     var ffn_out: LayoutTensor[ftype, Self.ffn_out_layout, MutAnyOrigin]
 
     fn __init__(out self):
+        # TODO: setup zeroTensorRand for better readability
         self.ln_attn = LayerNormWeights()
         self.attn_weights = AttentionWeights()
         self.ln_ffn = LayerNormWeights()
@@ -346,6 +392,7 @@ struct TransformerBlock(
         X: LayoutTensor[ftype, layout, MutAnyOrigin],
         mut output: LayoutTensor[ftype, out_layout, MutAnyOrigin],
     ):
+
         print("begin tb forward")
         print("\tlayerNorm1")
         # layerNorm(input, gamma, beta, output)
@@ -444,35 +491,47 @@ struct TransformerBlock(
         print("DEBUG DONE")
         """
 
-
 struct LLM:
+    # store token ids so we can update token embeddings
+    var input_token_ids: LayoutTensor[token_itype, Layout.row_major(ModelParams.seq_len), MutAnyOrigin]
+    var embedded_X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
+    # to take tokens and create a valid input:
+    var embedding_weights: EmbeddingWeights
+    # attention blocks
     var blocks: InlineArray[
         TransformerBlock, ModelParams.num_transformer_blocks
     ]
+    # layer norm -> output layer -> final_ln_output
     var ln_final_weights: LayerNormWeights
     var output_weights: OutputWeights
     comptime output_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.vocab_size
     )
+    var final_ln_output: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
     var logits: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
-    # var output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
     fn __init__(out self):  # allocate buffers and pre-fill / load etc.
+        self.input_token_ids = type_of(self.input_token_ids)(alloc[Scalar[token_itype]](ModelParams.seq_len)).fill(0)
+        self.embedded_X = zeroTensorHeap[TransformerBlock.X_layout]()
+        self.embedding_weights = EmbeddingWeights.initRandom()
         self.blocks = type_of(self.blocks)(fill=TransformerBlock.initRandom())
         self.ln_final_weights = LayerNormWeights.initRandom()
         self.output_weights = OutputWeights.initRandom()
+        self.final_ln_output = zeroTensorHeap[TransformerBlock.X_layout]()
         self.logits = zeroTensorHeap[Self.output_layout]()
-        # self.output = zeroTensorHeap[Self.output_layout]()
 
     fn forward(
         mut self,
-        X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
+        token_ids: List[Int], # TODO: should this be InlineArray[Int, seq_len]
         out output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin],
     ):
         """
-        Caller owns memory of logits.
+        Caller needs to free memory of final output.
         """
-        var block_output = X
+        #assert_equal(ModelParams.seq_len, len(tokens))
+        self.embedding_weights.embedTokens(token_ids, self.embedded_X)
+
+        var block_output = self.embedded_X.copy()
         for i in range(len(self.blocks)):
             print("LLM TransformerBlock", i)
             var ffn_out_temp = LayoutTensor[
@@ -487,16 +546,35 @@ struct LLM:
             block_output,
             self.ln_final_weights.gamma,
             self.ln_final_weights.beta,
-            self.logits,
+            self.final_ln_output,
         )
 
         print("Final linear layer...")
         output = zeroTensorHeap[Self.output_layout]()
         weightAndBias(
-            self.logits, self.output_weights.W, self.output_weights.b, output
+            self.final_ln_output, self.output_weights.W, self.output_weights.b, output
         )
+        self.logits = output.copy()
         # naiveSoftmax(output)
+
+    fn getNextTokenGreedy(self) -> Int:
+        """
+        Call *after* a forward pass. This is not an end-to-end prediction path,
+        just an abstraction so we can do temperature based, top-K, etc. types
+        of token selection.
+        """
+        var last_row = ModelParams.seq_len - 1
+        var max_idx = 0
+        var mav_val = self.logits[last_row,0]
+
+        for i in range(ModelParams.vocab_size):
+            var temp_val = self.logits[last_row, i]
+            if temp_val > max_val:
+                max_val = temp_val
+                max_idx = i
+        return max_idx
 
     fn __del__(deinit self):
         print("LLM __del__()")
+        self.input_token_ids.ptr.free()
         self.logits.ptr.free()

@@ -33,10 +33,6 @@ struct TokenChunks(Iterable, Copyable):
         self.tokens = type_of(self.tokens)(capacity = tokens_capacity) # oversized
         self.boundaries = type_of(self.boundaries)(capacity = num_chunks) # static
 
-    #fn __init__(out self, tokens: List[Int], boundaries: List[Int]):
-    #    self.tokens = tokens
-    #    self.boundaries = boundaries
-
     fn addChunk(mut self, chunk: List[Int]):
         idx = len(self.tokens)
         for tok in chunk:

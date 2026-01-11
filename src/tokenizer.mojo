@@ -30,6 +30,8 @@ from attention import ftype, sftype, nelts
 from cliparser import TokenizerParser
 from tokenchunks import TokenChunks
 
+@register_passable("trivial")
+@fieldwise_init
 struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCopyable, Representable):
     """
     Stores a hashable pair of Ints. There's probably another way to do this,
@@ -47,7 +49,7 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     This will easily fit in an int32, meaning an Int64 can always fit everything we could ever need. Note, we can ignore the "sign" bit, it doesn't affect anything for simple
     hashing.
     """
-    comptime __copyinit__is_trivial = True
+    #comptime __copyinit__is_trivial = True  # possibly redundant w/ @register_passable
     comptime DUMMY = Self(-1, -1)
     comptime delimeter = '|'
 
@@ -55,15 +57,17 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     var a: Int
     var b: Int
 
-    fn __init__(out self, a: Int, b: Int):
-        self.a = a
-        self.b = b
+    #fn __init__(out self, a: Int, b: Int):
+    #    self.a = a
+    #    self.b = b
 
     @staticmethod
     @always_inline("nodebug")
     fn fromRepr(repr: StringSlice) raises -> Self:
-        # '(123|456)' - watch out for leading spaces # TODO : check for that
-        var stripped_repr = repr[1:-1] # remove ()
+        # not the safest but should be fine
+        #var had_space: Int = 1 if repr[0] == ' ' else 0
+        var had_space = 0
+        var stripped_repr = repr[1 + had_space :-1] # remove ()
         var pair_strs = stripped_repr.split(Self.delimeter)
         try:
             var a = Int(pair_strs[0])
@@ -80,7 +84,6 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
         return self.a == other.a and self.b == other.b
 
     fn __repr__(self) -> String:
-        # be kind to yourself and use a sane delimeter
         return "(" + String(self.a) + Self.delimeter + String(self.b) + ")"
 
 struct ASCIITokenizer(Copyable, Movable):
@@ -542,8 +545,6 @@ struct ASCIITokenizer(Copyable, Movable):
         var a = text_tokens[0]
         var b = text_tokens[1]
         for i in range(len(text_tokens) - 1):
-            #var a = text_tokens[i]
-            #var b = text_tokens[i + 1]
             counts[a * s + b] += 1
             a = b
             b = text_tokens[i + 1]
