@@ -2,6 +2,9 @@
 .pixi/*
 !.pixi/config.toml
 
+iterator.mojo
+
+perf.data*
 out.perf
 out.folded
 flamegraph*

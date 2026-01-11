@@ -2,8 +2,6 @@ from layout import Layout, LayoutTensor
 from math import sqrt, exp, log, ceildiv
 from random import random_float64, random_si64, randint, randn, rand, seed
 from sys.info import (
-    simd_bit_width,
-    simd_byte_width,
     simd_width_of,
     num_logical_cores,
 )  # sizeof moved
@@ -20,6 +18,7 @@ from hashlib.hasher import Hasher, default_hasher
 from utils.lock import BlockingSpinLock
 from os.atomic import Atomic
 from collections import Set
+#from python import Python # for RegExp engines
 
 from helpers import (
     showProgress,
@@ -27,11 +26,9 @@ from helpers import (
     compareBuffers,
     fillTensorRand,
 )
-
 from attention import ftype, sftype, nelts
 from cliparser import TokenizerParser
-
-from python import Python # for RegExp engines
+from tokenchunks import TokenChunks
 
 struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCopyable, Representable):
     """
@@ -43,7 +40,7 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     Example with 4-bit indexes as 8-bit:
     a: 1101
     b: 0101
-    => bit-shift "a" to the left and add yields the unique =>
+    => bit-shift "a" to the left 4 times and add "b" yields the unique =>
     hash_me: 11010101
 
     GPT-2 has a vocab size of about 50k, later models perhaps double that.
@@ -126,11 +123,13 @@ struct ASCIITokenizer(Copyable, Movable):
             ids = self._merge(ids, most_common_pair, s)
         print()
 
+
     fn regexpPreProcess(self, raw_text: String) -> List[List[Int]]:
         var chunks = List[List[Int]]()
+        # var pattern = "'(?i:[sdmt]|ll|ve|re)|\\w+|[^\\w\\s]+|\\s+" #r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+"
+        _ = """
         try:
             var re = Python.import_module("re")
-            var pattern = "'(?i:[sdmt]|ll|ve|re)|\\w+|[^\\w\\s]+|\\s+" #r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+"
             var matches = re.findall(pattern, raw_text)
 
             for m in matches:
@@ -140,10 +139,11 @@ struct ASCIITokenizer(Copyable, Movable):
                 chunks.append(chunk^)
         except e:
             print(e, file = stderr)
+        """
         return chunks^
 
     @staticmethod
-    fn boundaryProtect(raw_ids: List[Int]) -> List[List[Int]]:
+    fn boundaryProtect(raw_ids: List[Int]) -> TokenChunks:
         """
         Splits into chunks based on: contractions | words | punctuation | whitespace
         See below comment for Pattern approximation (raw strings not supported yet).
@@ -151,8 +151,9 @@ struct ASCIITokenizer(Copyable, Movable):
         """
         #Pattern approximation: r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+".
         
-        var chunks = List[List[Int]]()
+        #var boundary_idxs = List[Int]()
         var n = len(raw_ids)
+        var chunks = TokenChunks(n) #conceptually a List[List[Int]]()
         var i = 0
         
         while i < n:
@@ -173,7 +174,7 @@ struct ASCIITokenizer(Copyable, Movable):
                         chunk.append(raw_ids[i])
                         chunk.append(raw_ids[i + 1])
                         chunk.append(raw_ids[i + 2])
-                        chunks.append(chunk^)
+                        chunks.addChunk(chunk^)
                         i += 3
                         continue
                 
@@ -187,21 +188,21 @@ struct ASCIITokenizer(Copyable, Movable):
                         var chunk = List[Int]()
                         chunk.append(raw_ids[i])
                         chunk.append(raw_ids[i + 1])
-                        chunks.append(chunk^)
+                        chunks.addChunk(chunk^)
                         i += 2
                         continue
                 
                 # Just a lone apostrophe - treat as punctuation
                 var chunk = List[Int]()
                 chunk.append(id)
-                chunks.append(chunk^)
+                chunks.addChunk(chunk^)
                 i += 1
             
             # Whitespace - separate chunk
             elif id == ord(' ') or id == ord('\n') or id == ord('\t') or id == ord('\r'):
                 var chunk = List[Int]()
                 chunk.append(id)
-                chunks.append(chunk^)
+                chunks.addChunk(chunk^)
                 i += 1
             
             # Alphanumeric - collect into word
@@ -218,82 +219,53 @@ struct ASCIITokenizer(Copyable, Movable):
                         i += 1
                     else:
                         break
-                chunks.append(chunk^)
+                #chunks.addChunk(chunk^) # removed so we can check for "n't"
             
+                # Check if word ends with 'n' and is followed by "'t"
+                if len(chunk) > 0 and i + 2 <= n:
+                    var last_char = chunk[len(chunk) - 1]
+                    if (last_char == ord('n') or last_char == ord('N')) and \
+                       i + 1 < n and raw_ids[i] == ord("'") and \
+                       i + 1 < n and (raw_ids[i + 1] == ord('t') or raw_ids[i + 1] == ord('T')):
+                        # Remove 'n' from word chunk
+                        _ = chunk.pop()
+                        chunks.addChunk(chunk^)
+                        
+                        # Create "n't" chunk
+                        var contraction = List[Int]()
+                        contraction.append(last_char)  # n
+                        contraction.append(raw_ids[i])   # '
+                        contraction.append(raw_ids[i + 1]) # t
+                        chunks.addChunk(contraction^)
+                        i += 2
+                        continue
+                
+                chunks.addChunk(chunk^)
+
             # Punctuation - separate chunk
             else:
                 var chunk = List[Int]()
                 chunk.append(id)
-                chunks.append(chunk^)
+                chunks.addChunk(chunk^)
                 i += 1
         
         #for chunk in chunks[:100]:
         #    print(chunk)
         return chunks^
 
-    @staticmethod
-    fn boundaryProtectOld(raw_ids: List[Int]) -> List[List[Int]]:
-        """
-        Takes in a flat list of token_ids and separates them into smarter chunks
-        to merge. For example, we don't want the word | don't | to get tokenized
-        into "| don' | t |" or "| do | n't |". We can "manually" discourage this.
-
-        """
-        return List[List[Int]]()
-        _ = """
-        var chunks = List[List[Int]]()
-        var n = len(raw_ids)
-
-        var i = 0
-        while i < n:
-            var id = raw_ids[i]
-            var chunk = List[Int]()
-            if id == ord(' ') or id == ord('\n'): # ord(' ') == 32
-                chunks.append(chunk^)
-                i += 1
-            elif id == ord("'"):
-                chunks.append(chunk^)
-                chunk = type_of(chunk)() # reinitialize
-                if i + 2 < n:
-                    var find_strs = ["ll", "ve", "re"]
-                    find_strs.extend([x.upper() for x in find_strs])
-                    print("finding", find_strs)
-                    var find = [Self.stringToTokenList(x) for x in find_strs]
-                    if raw_ids[i : i + 2] in find:
-                        print("found", raw_ids[i : i + 2])
-                        chunks.append(raw_ids[i : i + 2].copy())
-                    else:
-                        chunk.extend(raw_ids[i : i + 2].copy())
-                    i += 3
-                if i + 1 < n:
-                    var find_strs = ['s', 'd', 'm', 't']
-                    find_strs.extend([x.upper() for x in find])
-                    print("finding", find_strs)
-                    var find = [Self.stringToTokenList(x) for x in find_strs]
-                    if raw_tokens[i : i + 1] in find:
-                        print("found", raw_ids[i : i + 1])
-                        chunks.append(raw_ids[i : i + 1].copy())
-                    else:
-                        chunk.extend(raw_ids[i : i + 1].copy())
-                    i += 2
-            else:
-                chunk.append(id)
-                i += 1
-        chunks.append(temp^)
-        return chunks^
-        """
-
-    fn trainWithProtections(mut self, text: StringSlice):
+    fn trainWithProtections(mut self, text: StringSlice, debug_display: Bool = False):
         """
         Byte Pair Encoding. Text is assumed to be ASCII. Implements "regexp".
         """
-        print("Training with BPE to vocab size", self.vocab_size, "...")
+        if debug_display:
+            print("Training with BPE to vocab size", self.vocab_size, "...")
         var raw_ids: List[Int] = Self.stringToTokenList(text)
-        var ids: List[List[Int]] = Self.boundaryProtect(raw_ids)
+        var ids: TokenChunks = Self.boundaryProtect(raw_ids)
 
         var num_merges = self.vocab_size - 256
         for i in range(num_merges):
-            showProgress(i, num_merges)
+            if debug_display:
+                showProgress(i, num_merges)
 
             var most_common_pair_count = 0
             var most_common_pair = Pair.DUMMY # dummy values
@@ -317,7 +289,8 @@ struct ASCIITokenizer(Copyable, Movable):
                 print(id, end = " ")
             print("\n\n")
             """
-        print()
+        if debug_display:
+            print()
 
     fn encode(self, text: StringSlice) -> List[Int]:
         var ids = Self.stringToTokenList(text)
@@ -340,7 +313,7 @@ struct ASCIITokenizer(Copyable, Movable):
                 raise Error("Tokenizer error!", n, "> 255")
             bytes.append(Byte(n))
 
-        return String(bytes = bytes)
+        return String(unsafe_from_utf8 = bytes)
     
     fn exportVocab(self, filename: String):
         """
@@ -420,7 +393,7 @@ struct ASCIITokenizer(Copyable, Movable):
                 else:
                     i += 1
 
-        var result = String(bytes=[Byte(x) for x in internal])
+        var result = String(unsafe_from_utf8=[Byte(x) for x in internal])
         return result
 
     fn _unmerge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
@@ -516,12 +489,13 @@ struct ASCIITokenizer(Copyable, Movable):
         
         return merged^
 
-    fn _mergeChunks(self, chunks: List[List[Int]], pair: Pair, new_token_id: Int) -> List[List[Int]]:
+    fn _mergeChunks(self, read chunks: TokenChunks, pair: Pair, new_token_id: Int) -> TokenChunks:
         """
         We take in a read-only list of token ids and allocate new fresh memory.
         """
-        var n = len(chunks)
-        var merged = List[List[Int]](capacity = n)
+        var tokens_capacity = len(chunks.tokens)
+        var num_chunks = len(chunks.boundaries)
+        var merged = TokenChunks(tokens_capacity, num_chunks)
 
         var c = pair.a
         var d = pair.b
@@ -541,10 +515,11 @@ struct ASCIITokenizer(Copyable, Movable):
                     i += 1
             if i < m:
                 temp.append(chunk[i])
-            merged.append(temp^)
+            merged.addChunk(temp^)
         
         return merged^
-    fn _countPairsChunks(self, chunks: List[List[Int]], s: Int) -> List[Int]:
+
+    fn _countPairsChunks(self, chunks: TokenChunks, s: Int) -> List[Int]:
         """
         For this Shakespeare dataset, the max counted pair is seen 27643 times.
         We could probably save a lot of memory by using [U]Int16, need be on a
@@ -609,14 +584,15 @@ fn main():
             var text = f.read()
 
             var tokenizer = ASCIITokenizer(config.vocab_size) # ~280 is enough to display recursion
-            tokenizer.trainWithProtections(text)
-            print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
+            tokenizer.trainWithProtections(text, True)
+            #print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
             #print(showExample(tokenizer, tokenizer.encode(text[:500])))
             tokenizer.save(config.save_name)
 
             var vocab_filename = "models/vocab_{}.txt".format(config.vocab_size)
             tokenizer.exportVocab(vocab_filename)
 
+            #var ratio = compareTrainingTimesTest(text, vocab_size = 1000, runs = 5)
             _ = """
             var tok2 = ASCIITokenizer.load("bpe_25000.tok")
             var test_ids = tok2.encode(text[:200])

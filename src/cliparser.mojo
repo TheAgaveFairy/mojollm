@@ -1,4 +1,5 @@
 from sys import stderr, argv
+from pathlib import Path
 #from subprocess import run as subprocessRun
 
 struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Representable):
@@ -63,7 +64,8 @@ struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Represen
                 self.had_error = True
         # have to wait for this
         if self.save_name == Self.DUMMY:
-            self.save_name = "./models/bpe_{}.tok".format(self.vocab_size)
+            var filename = Path(self.input_filename).name().split(".")[0]
+            self.save_name = "./models/bpe_{}_{}.tok".format(self.vocab_size, filename)
 
     fn printBoundsError(mut self, text: String):
         print("Error in args. Please try again; probably caused by a flag at the end with no following value.")
@@ -111,7 +113,7 @@ struct TokenizerParser(Copyable, Movable, ImplicitlyCopyable, Writable, Represen
     fn __repr__(self) -> String:
         return self.__str__()
     fn write_to(self, mut writer: Some[Writer]):
-        writer.write_bytes(self.__str__().as_bytes())
+        writer.write_string(self.__str__())
 
 fn main():
     var parser = TokenizerParser()
