@@ -44,6 +44,7 @@ comptime nelts = simd_width_of[ftype]()
 # token IDs stored as:
 comptime token_itype = DType.uint16
 
+
 struct ModelParams:
     comptime num_transformer_blocks = 1 << 2
     comptime vocab_size = 1 << 10
@@ -70,20 +71,37 @@ trait Weights(Defaultable):
     # fn saveToFile(self):
     #    pass
 
+
 struct EmbeddingWeights(Copyable, Weights):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
 
-    comptime token_embeddings_layout = Layout.row_major(ModelParams.vocab_size, ModelParams.d_model)
-    comptime position_embeddings_layout = Layout.row_major(ModelParams.seq_len, ModelParams.d_model)
-    var token_embeddings: LayoutTensor[ftype, Self.token_embeddings_layout, MutAnyOrigin]
-    var position_embeddings: LayoutTensor[ftype, Self.position_embeddings_layout, MutAnyOrigin]
+    comptime token_embeddings_layout = Layout.row_major(
+        ModelParams.vocab_size, ModelParams.d_model
+    )
+    comptime position_embeddings_layout = Layout.row_major(
+        ModelParams.seq_len, ModelParams.d_model
+    )
+    var token_embeddings: LayoutTensor[
+        ftype, Self.token_embeddings_layout, MutAnyOrigin
+    ]
+    var position_embeddings: LayoutTensor[
+        ftype, Self.position_embeddings_layout, MutAnyOrigin
+    ]
 
-    var token_embeddings_grad: LayoutTensor[ftype, Self.token_embeddings_layout, MutAnyOrigin]
-    var position_embeddings_grad: LayoutTensor[ftype, Self.position_embeddings_layout, MutAnyOrigin]
+    var token_embeddings_grad: LayoutTensor[
+        ftype, Self.token_embeddings_layout, MutAnyOrigin
+    ]
+    var position_embeddings_grad: LayoutTensor[
+        ftype, Self.position_embeddings_layout, MutAnyOrigin
+    ]
 
     @always_inline("nodebug")
-    fn embedTokens(self, token_ids: List[Int], mut X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]):
+    fn embedTokens(
+        self,
+        token_ids: List[Int],
+        mut X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
+    ):
         """
         Helper function for the forward pass of my LLM. The rebinds etc are
         just a bit much, and I'd prefer that forward to abstract away the
@@ -91,18 +109,32 @@ struct EmbeddingWeights(Copyable, Weights):
         """
         comptime d_model_slice = Slice(0, ModelParams.d_model)
         for i in range(ModelParams.seq_len):
-            var tok_emb = self.token_embeddings.slice_1d[d_model_slice, IndexList[1](1)]([token_ids[i]])
-            var pos_emb = self.position_embeddings.slice_1d[d_model_slice, IndexList[1](1)](IndexList[1](i))
+            var tok_emb = self.token_embeddings.slice_1d[
+                d_model_slice, IndexList[1](1)
+            ](IndexList[1](token_ids[i]))
+            var pos_emb = self.position_embeddings.slice_1d[
+                d_model_slice, IndexList[1](1)
+            ](IndexList[1](i))
 
-            var output_slice = X.slice_1d[d_model_slice, IndexList[1](1)](IndexList[1](i))
+            var output_slice = X.slice_1d[d_model_slice, IndexList[1](1)](
+                IndexList[1](i)
+            )
             output_slice += tok_emb
             output_slice += pos_emb
 
     fn __init__(out self):
-        self.token_embeddings = type_of(self.token_embeddings)(alloc[sftype](Self.token_embeddings_layout.size())).fill(0.0)
-        self.position_embeddings = type_of(self.position_embeddings)(alloc[sftype](Self.position_embeddings_layout.size())).fill(0.0)
-        self.token_embeddings_grad = type_of(self.token_embeddings_grad)(alloc[sftype](Self.token_embeddings_layout.size())).fill(0.0)
-        self.position_embeddings_grad = type_of(self.position_embeddings_grad)(alloc[sftype](Self.position_embeddings_layout.size())).fill(0.0)
+        self.token_embeddings = type_of(self.token_embeddings)(
+            alloc[sftype](Self.token_embeddings_layout.size())
+        ).fill(0.0)
+        self.position_embeddings = type_of(self.position_embeddings)(
+            alloc[sftype](Self.position_embeddings_layout.size())
+        ).fill(0.0)
+        self.token_embeddings_grad = type_of(self.token_embeddings_grad)(
+            alloc[sftype](Self.token_embeddings_layout.size())
+        ).fill(0.0)
+        self.position_embeddings_grad = type_of(self.position_embeddings_grad)(
+            alloc[sftype](Self.position_embeddings_layout.size())
+        ).fill(0.0)
 
     @staticmethod
     fn initRandom(out self: Self):
@@ -116,6 +148,7 @@ struct EmbeddingWeights(Copyable, Weights):
         self.position_embeddings.ptr.free()
         self.token_embeddings_grad.ptr.free()
         self.position_embeddings_grad.ptr.free()
+
 
 struct AttentionWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
@@ -220,6 +253,7 @@ struct FFWeights(Copyable, Movable, Weights):
         self.w1.ptr.free()
         self.b1.ptr.free()
 
+
 struct LayerNormWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
@@ -245,6 +279,7 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         print("LayerNormWeights __del__()")
         self.gamma.ptr.free()
         self.beta.ptr.free()
+
 
 struct OutputWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
@@ -391,15 +426,17 @@ struct TransformerBlock(
         mut self,
         X: LayoutTensor[ftype, layout, MutAnyOrigin],
         mut output: LayoutTensor[ftype, out_layout, MutAnyOrigin],
+        display: Bool = False,
     ):
-
-        print("begin tb forward")
-        print("\tlayerNorm1")
+        if display:
+            print("begin tb forward")
+            print("\tlayerNorm1")
         # layerNorm(input, gamma, beta, output)
         self.X_pre_ln_attn.copy_from(X)
         layerNorm(X, self.ln_attn.gamma, self.ln_attn.beta, self.X_post_ln_attn)
 
-        print("\tgenerate QKV")
+        if display:
+            print("\tgenerate QKV")
         # weightAndBias(input, weight, bias, output)
         weightAndBias(
             self.X_post_ln_attn,
@@ -419,8 +456,9 @@ struct TransformerBlock(
             self.attn_weights.b_v,
             self.V,
         )
-
-        print("\tnaive attention")
+        
+        if display:
+            print("\tnaive attention")
         # causal masking not implemented YET
         naiveAttention(
             self.Q,
@@ -431,12 +469,14 @@ struct TransformerBlock(
             self.attn_out_pre_residual,
         )
 
-        print("\tresidual conn #1")
+        if display:
+            print("\tresidual conn #1")
         # residual conn #1
         self.attn_out_post_residual.copy_from(self.attn_out_pre_residual)
         self.attn_out_post_residual += self.X_pre_ln_attn
 
-        print("\tlayerNorm2")
+        if display:
+            print("\tlayerNorm2")
         layerNorm(
             self.attn_out_post_residual,
             self.ln_ffn.gamma,
@@ -444,7 +484,8 @@ struct TransformerBlock(
             self.ffn_input,
         )
 
-        print("\tfeedForward")
+        if display:
+            print("\tfeedForward")
         # feedForward(input, w0, b0, w1, b1, hidden_buffer, output)
         feedForward(
             self.ffn_input,
@@ -455,8 +496,8 @@ struct TransformerBlock(
             self.ffn_hidden,
             self.ffn_out,
         )
-
-        print("final residual")
+        if display:
+            print("final residual")
         output.copy_from(self.ffn_out)
         output += self.attn_out_post_residual
 
@@ -491,9 +532,12 @@ struct TransformerBlock(
         print("DEBUG DONE")
         """
 
+
 struct LLM:
     # store token ids so we can update token embeddings
-    var input_token_ids: LayoutTensor[token_itype, Layout.row_major(ModelParams.seq_len), MutAnyOrigin]
+    var input_token_ids: LayoutTensor[
+        token_itype, Layout.row_major(ModelParams.seq_len), MutAnyOrigin
+    ]
     var embedded_X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
     # to take tokens and create a valid input:
     var embedding_weights: EmbeddingWeights
@@ -507,11 +551,15 @@ struct LLM:
     comptime output_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.vocab_size
     )
-    var final_ln_output: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
+    var final_ln_output: LayoutTensor[
+        ftype, TransformerBlock.X_layout, MutAnyOrigin
+    ]
     var logits: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
     fn __init__(out self):  # allocate buffers and pre-fill / load etc.
-        self.input_token_ids = type_of(self.input_token_ids)(alloc[Scalar[token_itype]](ModelParams.seq_len)).fill(0)
+        self.input_token_ids = type_of(self.input_token_ids)(
+            alloc[Scalar[token_itype]](ModelParams.seq_len)
+        ).fill(0)
         self.embedded_X = zeroTensorHeap[TransformerBlock.X_layout]()
         self.embedding_weights = EmbeddingWeights.initRandom()
         self.blocks = type_of(self.blocks)(fill=TransformerBlock.initRandom())
@@ -522,18 +570,21 @@ struct LLM:
 
     fn forward(
         mut self,
-        token_ids: List[Int], # TODO: should this be InlineArray[Int, seq_len]
+        token_ids: List[Int],  # TODO: should this be InlineArray[Int, seq_len]
         out output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin],
+        display: Bool = False
     ):
         """
         Caller needs to free memory of final output.
         """
-        #assert_equal(ModelParams.seq_len, len(tokens))
+        # assert_equal(ModelParams.seq_len, len(tokens))
         self.embedding_weights.embedTokens(token_ids, self.embedded_X)
+        print("EMBEDDED X:\n", self.embedded_X,"\n\n")
 
         var block_output = self.embedded_X.copy()
         for i in range(len(self.blocks)):
-            print("LLM TransformerBlock", i)
+            if display:
+                print("LLM TransformerBlock", i)
             var ffn_out_temp = LayoutTensor[
                 ftype, TransformerBlock.ffn_out_layout, MutAnyOrigin
             ].stack_allocation()
@@ -541,7 +592,8 @@ struct LLM:
             self.blocks[i].ffn_out.copy_from(ffn_out_temp)
             block_output = self.blocks[i].ffn_out
 
-        print("LLM forward blocks done")
+        if display:
+            print("LLM forward blocks done")
         layerNorm(
             block_output,
             self.ln_final_weights.gamma,
@@ -549,10 +601,14 @@ struct LLM:
             self.final_ln_output,
         )
 
-        print("Final linear layer...")
+        if display:
+            print("Final linear layer...")
         output = zeroTensorHeap[Self.output_layout]()
         weightAndBias(
-            self.final_ln_output, self.output_weights.W, self.output_weights.b, output
+            self.final_ln_output,
+            self.output_weights.W,
+            self.output_weights.b,
+            output,
         )
         self.logits = output.copy()
         # naiveSoftmax(output)
@@ -565,7 +621,7 @@ struct LLM:
         """
         var last_row = ModelParams.seq_len - 1
         var max_idx = 0
-        var mav_val = self.logits[last_row,0]
+        var max_val = self.logits[last_row, 0]
 
         for i in range(ModelParams.vocab_size):
             var temp_val = self.logits[last_row, i]

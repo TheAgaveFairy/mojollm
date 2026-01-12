@@ -3,6 +3,7 @@
 !.pixi/config.toml
 
 iterator.mojo
+tokenizer
 
 perf.data*
 out.perf
