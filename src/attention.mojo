@@ -13,7 +13,7 @@ import os
 from memory import memcpy, memset, memset_zero
 from time import perf_counter_ns
 from algorithm.functional import vectorize, parallelize
-from compile.reflection import get_linkage_name
+from reflection import get_linkage_name
 from compile import compile_info
 import benchmark  # run, Unit.ms
 
@@ -577,9 +577,15 @@ struct LLM:
         """
         Caller needs to free memory of final output.
         """
+        fn printTensorSlice[layout: Layout](tensor: LayoutTensor[ftype, layout, MutAnyOrigin], name: String):
+            print("Tensor", name, ":\n")
+            comptime tile = 4
+            var tslice = tensor.slice[Slice(0, tile), Slice(0, tile), IndexList[2](0,1)](IndexList[1](0))
+            print(tslice, "\n")
         # assert_equal(ModelParams.seq_len, len(tokens))
         self.embedding_weights.embedTokens(token_ids, self.embedded_X)
-        print("EMBEDDED X:\n", self.embedded_X,"\n\n")
+        #print("EMBEDDED X:\n", self.embedded_X,"\n\n")
+        printTensorSlice(self.embedded_X, "embedded X")
 
         var block_output = self.embedded_X.copy()
         for i in range(len(self.blocks)):
@@ -591,6 +597,7 @@ struct LLM:
             self.blocks[i].forward(block_output, ffn_out_temp)
             self.blocks[i].ffn_out.copy_from(ffn_out_temp)
             block_output = self.blocks[i].ffn_out
+            printTensorSlice(self.blocks[i].ffn_out, "block " + String(i) + " ffn_out")
 
         if display:
             print("LLM forward blocks done")
@@ -600,6 +607,7 @@ struct LLM:
             self.ln_final_weights.beta,
             self.final_ln_output,
         )
+        printTensorSlice(self.final_ln_output, "final ln output")
 
         if display:
             print("Final linear layer...")
@@ -610,6 +618,7 @@ struct LLM:
             self.output_weights.b,
             output,
         )
+        printTensorSlice(output, "final output")
         self.logits = output.copy()
         # naiveSoftmax(output)
 

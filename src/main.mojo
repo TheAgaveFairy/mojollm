@@ -31,8 +31,11 @@ fn splitInput(toks: List[Int]) -> List[List[Int]]:
     return output^
 
 fn tempPrintOutput[layout: Layout](output: LayoutTensor[ftype, layout, MutAnyOrigin]):
-    var last_row = ModelParams.seq_len - 1
-    for i in range(ModelParams.d_model):
+    comptime last_row = ModelParams.seq_len - 1
+    comptime limit = 5
+    comptime show_me = min(ModelParams.d_model, limit)
+    print("Output, limit", limit, ":\n")
+    for i in range(show_me):
         print(output[last_row, i], end = ", ")
     print()
 

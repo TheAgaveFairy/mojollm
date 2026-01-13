@@ -6,10 +6,11 @@ from memory import memset, memset_zero
 
 from attention import ftype, sftype, nelts
 
-fn fillTensorRand[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
-    randn(x.ptr, layout.size(), 0, 1)
+comptime std_std_deviation = 0.5
+fn fillTensorRand[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin], std: Float64 = std_std_deviation):
+    randn(x.ptr, layout.size(), 0, std) # mean of zero
 
-fn randTensorHeap[layout: Layout]() -> LayoutTensor[ftype, layout, MutAnyOrigin]:
+fn randTensorHeap[layout: Layout](std: Float64 = std_std_deviation) -> LayoutTensor[ftype, layout, MutAnyOrigin]:
     var storage = alloc[sftype](layout.size())
     randn(storage, layout.size(), 0, 1)
     return LayoutTensor[ftype, layout, MutAnyOrigin](storage)
