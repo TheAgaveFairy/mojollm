@@ -27,6 +27,8 @@ from helpers import (
     zeroTensorHeap,
     compareBuffers,
     fillTensorRand,
+    ColorsEnum,
+    coloredString,
 )
 from activation_fn import ActivationFunction, ReLU
 from ops import (
@@ -43,7 +45,7 @@ comptime nelts = simd_width_of[ftype]()
 
 # token IDs stored as:
 comptime token_itype = DType.uint16
-
+comptime display = False
 
 struct ModelParams:
     comptime num_transformer_blocks = 1 << 2
@@ -61,7 +63,10 @@ struct ModelParams:
 
 trait Weights(Defaultable):
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64):
+        ...
+
+    fn freeMemory(mut self):
         ...
 
     # TODO: implement saving / loading
@@ -137,17 +142,24 @@ struct EmbeddingWeights(Copyable, Weights):
         ).fill(0.0)
 
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64 = 0.02):
         self = Self()
-        fillTensorRand(self.token_embeddings)
-        fillTensorRand(self.position_embeddings)
+        fillTensorRand(self.token_embeddings, std)
+        fillTensorRand(self.position_embeddings, std)
 
-    fn __del__(deinit self):
-        print("EmbeddingWeights __del__()")
+    fn freeMemory(mut self):
+        print("EmbeddingWeights freeMemory()")
         self.token_embeddings.ptr.free()
         self.position_embeddings.ptr.free()
         self.token_embeddings_grad.ptr.free()
         self.position_embeddings_grad.ptr.free()
+
+    fn __del__(deinit self):
+        print("EmbeddingWeights __del__()")
+        #self.token_embeddings.ptr.free()
+        #self.position_embeddings.ptr.free()
+        #self.token_embeddings_grad.ptr.free()
+        #self.position_embeddings_grad.ptr.free()
 
 
 struct AttentionWeights(Copyable, Movable, Weights):
@@ -158,56 +170,61 @@ struct AttentionWeights(Copyable, Movable, Weights):
     comptime W_q_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_k)
     # comptime W_k_layout = W_q_layout
     comptime W_v_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_v)
+    var W_q_ptr: UnsafePointer[sftype, MutAnyOrigin]
+    var W_k_ptr: UnsafePointer[sftype, MutAnyOrigin]
+    var W_v_ptr: UnsafePointer[sftype, MutAnyOrigin]
     var W_q: LayoutTensor[ftype, Self.W_q_layout, MutAnyOrigin]
     var W_k: LayoutTensor[ftype, Self.W_q_layout, MutAnyOrigin]
     var W_v: LayoutTensor[ftype, Self.W_v_layout, MutAnyOrigin]
 
     comptime b_q_layout = Layout.row_major(ModelParams.d_k)
     comptime b_v_layout = Layout.row_major(ModelParams.d_v)
+    var b_q_ptr: UnsafePointer[sftype, MutAnyOrigin]
+    var b_k_ptr: UnsafePointer[sftype, MutAnyOrigin]
+    var b_v_ptr: UnsafePointer[sftype, MutAnyOrigin]
     var b_q: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_k: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
     fn __init__(out self):
-        self.W_q = type_of(self.W_q)(
-            alloc[sftype](Self.W_q_layout.size())
-        ).fill(0.0)
-        self.W_k = type_of(self.W_k)(
-            alloc[sftype](Self.W_q_layout.size())
-        ).fill(0.0)
-        self.W_v = type_of(self.W_v)(
-            alloc[sftype](Self.W_v_layout.size())
-        ).fill(0.0)
-        self.b_q = type_of(self.b_q)(
-            alloc[sftype](Self.b_q_layout.size())
-        ).fill(0.0)
-        self.b_k = type_of(self.b_k)(
-            alloc[sftype](Self.b_q_layout.size())
-        ).fill(0.0)
-        self.b_v = type_of(self.b_v)(
-            alloc[sftype](Self.b_v_layout.size())
-        ).fill(0.0)
+        # weights
+        self.W_q_ptr = alloc[sftype](Self.W_q_layout.size())
+        self.W_q = type_of(self.W_q)(self.W_q_ptr).fill(0.0)
+        self.W_k_ptr = alloc[sftype](Self.W_q_layout.size())
+        self.W_k = type_of(self.W_k)(self.W_k_ptr).fill(0.0)
+        self.W_v_ptr = alloc[sftype](Self.W_v_layout.size())
+        self.W_v = type_of(self.W_v)(self.W_v_ptr).fill(0.0)
+        # biases
+        self.b_q_ptr = alloc[sftype](Self.b_q_layout.size())
+        self.b_q = type_of(self.b_q)(self.b_q_ptr).fill(0.0)
+        self.b_k_ptr = alloc[sftype](Self.b_q_layout.size())
+        self.b_k = type_of(self.b_k)(self.b_k_ptr).fill(0.0)
+        self.b_v_ptr = alloc[sftype](Self.b_v_layout.size())
+        self.b_v = type_of(self.b_v)(self.b_v_ptr).fill(0.0)
 
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64 = 0.02):
         self = Self()
-        fillTensorRand(self.W_q)
-        fillTensorRand(self.W_q)
-        fillTensorRand(self.W_v)
+        fillTensorRand(self.W_q, std)
+        fillTensorRand(self.W_k, std)
+        fillTensorRand(self.W_v, std)
 
-        fillTensorRand(self.b_q)
-        fillTensorRand(self.b_q)
-        fillTensorRand(self.b_v)
+        #fillTensorRand(self.b_q, std)
+        #fillTensorRand(self.b_k, std)
+        #fillTensorRand(self.b_v, std)
+
+    fn freeMemory(mut self):
+        print("AttentionWeights freeMemory()")
+        self.W_q_ptr.free()
+        self.W_k_ptr.free()
+        self.W_v_ptr.free()
+
+        self.b_q_ptr.free()
+        self.b_k_ptr.free()
+        self.b_v_ptr.free()
 
     fn __del__(deinit self):
         print("AttentionWeights __del__()")
-        self.W_q.ptr.free()
-        self.W_k.ptr.free()
-        self.W_v.ptr.free()
-
-        self.b_q.ptr.free()
-        self.b_k.ptr.free()
-        self.b_v.ptr.free()
 
 
 struct FFWeights(Copyable, Movable, Weights):
@@ -239,19 +256,22 @@ struct FFWeights(Copyable, Movable, Weights):
         )
 
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64 = 0.02):
         self = Self()
-        fillTensorRand(self.w0)
-        fillTensorRand(self.b0)
-        fillTensorRand(self.w1)
-        fillTensorRand(self.b1)
+        fillTensorRand(self.w0, std)
+        #fillTensorRand(self.b0, std)
+        fillTensorRand(self.w1, std)
+        #fillTensorRand(self.b1, std)
 
-    fn __del__(deinit self):
-        print("FFWeights __del__()")
+    fn freeMemory(mut self):
+        print("FFWeights freeMemory()")
         self.w0.ptr.free()
         self.b0.ptr.free()
         self.w1.ptr.free()
         self.b1.ptr.free()
+
+    fn __del__(deinit self):
+        print("FFWeights __del__()")
 
 
 struct LayerNormWeights(Copyable, Movable, Weights):
@@ -270,16 +290,18 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         ).fill(0.0)
 
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64 = 0.02):
         self = Self()
-        fillTensorRand(self.gamma)
-        fillTensorRand(self.beta)
+        fillTensorRand(self.gamma, std)
+        #fillTensorRand(self.beta, std)
 
-    fn __del__(deinit self):
-        print("LayerNormWeights __del__()")
+    fn freeMemory(mut self):
+        print("LayerNormWeights freeMemory()")
         self.gamma.ptr.free()
         self.beta.ptr.free()
 
+    fn __del__(deinit self):
+        print("LayerNormWeights __del__()")
 
 struct OutputWeights(Copyable, Movable, Weights):
     comptime __copyinit__is_trivial = True
@@ -296,15 +318,18 @@ struct OutputWeights(Copyable, Movable, Weights):
         self.b = type_of(self.b)(alloc[sftype](Self.b_layout.size())).fill(0.0)
 
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64 = 0.02):
         self = Self()
-        fillTensorRand(self.W)
-        fillTensorRand(self.b)
+        fillTensorRand(self.W, std)
+        #fillTensorRand(self.b, std)
+
+    fn freeMemory(mut self):
+        print("OutputWeights freeMemory()")
+        self.W.ptr.free()
+        self.b.ptr.free()
 
     fn __del__(deinit self):
         print("OutputWeights __del__()")
-        self.W.ptr.free()
-        self.b.ptr.free()
 
 
 struct TransformerBlock(
@@ -346,12 +371,9 @@ struct TransformerBlock(
     comptime ffn_hidden_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.d_ff
     )
-    comptime ffn_out_layout = Layout.row_major(
-        ModelParams.seq_len, ModelParams.d_model
-    )
     var ffn_input: LayoutTensor[ftype, Self.V_layout, MutAnyOrigin]
     var ffn_hidden: LayoutTensor[ftype, Self.ffn_hidden_layout, MutAnyOrigin]
-    var ffn_out: LayoutTensor[ftype, Self.ffn_out_layout, MutAnyOrigin]
+    var ffn_out: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
 
     fn __init__(out self):
         # TODO: setup zeroTensorRand for better readability
@@ -372,9 +394,10 @@ struct TransformerBlock(
         self.V = type_of(self.V)(alloc[sftype](Self.V_layout.size())).fill(0.0)
 
         # initialize attn_scores, attn_out, ffn_hidden, ffn_output to zeros ...
-        self.attn_scores = type_of(self.attn_scores)(
-            alloc[sftype](Self.attn_scores_layout.size())
-        ).fill(0.0)
+        #self.attn_scores = type_of(self.attn_scores)(
+                #    alloc[sftype](Self.attn_scores_layout.size())
+            #).fill(0.0)
+        self.attn_scores = zeroTensorHeap[Self.attn_scores_layout]()
         self.attn_probs = type_of(self.attn_probs)(
             alloc[sftype](Self.attn_scores_layout.size())
         ).fill(0.0)
@@ -391,11 +414,11 @@ struct TransformerBlock(
             alloc[sftype](Self.ffn_hidden_layout.size())
         ).fill(0.0)
         self.ffn_out = type_of(self.ffn_out)(
-            alloc[sftype](Self.ffn_out_layout.size())
+            alloc[sftype](Self.X_layout.size())
         ).fill(0.0)
 
     @staticmethod
-    fn initRandom(out self: Self):
+    fn initRandom(out self: Self, std: Float64 = 0.02):
         self = Self()
         # TODO : old memory should be set in-place, this is awful
         self.ln_attn = LayerNormWeights.initRandom()
@@ -404,36 +427,37 @@ struct TransformerBlock(
         self.ffn_weights = FFWeights.initRandom()
         # /END AWFUL
 
-        fillTensorRand(self.X_pre_ln_attn)
-        fillTensorRand(self.X_post_ln_attn)
+        fillTensorRand(self.X_pre_ln_attn, std)
+        fillTensorRand(self.X_post_ln_attn, std)
 
-        fillTensorRand(self.Q)
-        fillTensorRand(self.K)
-        fillTensorRand(self.V)
+        fillTensorRand(self.Q, std)
+        fillTensorRand(self.K, std)
+        fillTensorRand(self.V, std)
 
         # initialize attn_scores, attn_out, ffn_hidden, ffn_output to zeros ...
-        fillTensorRand(self.attn_scores)
-        fillTensorRand(self.attn_probs)
-        fillTensorRand(self.attn_out_pre_residual)
-        fillTensorRand(self.attn_out_post_residual)
-        fillTensorRand(self.ffn_input)
-        fillTensorRand(self.ffn_hidden)
-        fillTensorRand(self.ffn_out)
+        fillTensorRand(self.attn_scores, std)
+        fillTensorRand(self.attn_probs, std)
+        fillTensorRand(self.attn_out_pre_residual, std)
+        fillTensorRand(self.attn_out_post_residual, std)
+        fillTensorRand(self.ffn_input, std)
+        fillTensorRand(self.ffn_hidden, std)
+        fillTensorRand(self.ffn_out, std)
 
     fn forward[
-        layout: Layout, out_layout: Layout
+        layout: Layout
     ](
         mut self,
         X: LayoutTensor[ftype, layout, MutAnyOrigin],
-        mut output: LayoutTensor[ftype, out_layout, MutAnyOrigin],
-        display: Bool = False,
+        mut output: LayoutTensor[ftype, layout, MutAnyOrigin],
     ):
         if display:
             print("begin tb forward")
             print("\tlayerNorm1")
         # layerNorm(input, gamma, beta, output)
         self.X_pre_ln_attn.copy_from(X)
-        layerNorm(X, self.ln_attn.gamma, self.ln_attn.beta, self.X_post_ln_attn)
+        printTensorSlice(self.X_pre_ln_attn, "X_pre_ln_attn")
+        layerNorm(self.X_pre_ln_attn, self.ln_attn.gamma, self.ln_attn.beta, self.X_post_ln_attn)
+        printTensorSlice(self.X_post_ln_attn, "X_post_ln_attn")
 
         if display:
             print("\tgenerate QKV")
@@ -501,10 +525,34 @@ struct TransformerBlock(
         output.copy_from(self.ffn_out)
         output += self.attn_out_post_residual
 
+    fn freeMemory(mut self):
+        print("TransformerBlock freeMemory()")
+        #print("LET OS HANDLE TransformerBlock __del__() FOR NOW", file=stderr)
+        self.ln_attn.freeMemory()
+        self.attn_weights.freeMemory()
+        self.ln_ffn.freeMemory()
+        self.ffn_weights.freeMemory()
+
+        self.X_pre_ln_attn.ptr.free()
+        self.X_post_ln_attn.ptr.free()
+        self.Q.ptr.free()
+        self.K.ptr.free()
+        self.V.ptr.free()
+
+        #self.attn_scores.ptr.free()
+        print("self.attn_scores.ptr.free() FAILS??", file=stderr)
+        self.attn_probs.ptr.free()
+        self.attn_out_pre_residual.ptr.free()
+        self.attn_out_post_residual.ptr.free()
+        self.ffn_input.ptr.free()
+        self.ffn_hidden.ptr.free()
+        self.ffn_out.ptr.free()
+
+
     fn __del__(deinit self):
         print("TransformerBlock __del__()")
         # not sure since nested, leave structs alone?
-        print("LET OS HANDLE TransformerBlock __del__() FOR NOW", file=stderr)
+        #print("LET OS HANDLE TransformerBlock __del__() FOR NOW", file=stderr)
         _ = """
         self.X_pre_ln_attn.ptr.free()
         self.X_post_ln_attn.ptr.free()
@@ -532,6 +580,13 @@ struct TransformerBlock(
         print("DEBUG DONE")
         """
 
+fn printTensorSlice[layout: Layout](tensor: LayoutTensor[ftype, layout, MutAnyOrigin], name: String,  display: Bool = True):
+    if not display:
+        return
+    print("Tensor", name, ":\n")
+    comptime tile = 4
+    var tslice = tensor.slice[Slice(0, tile), Slice(0, tile), IndexList[2](0,1)](IndexList[1](0))
+    print(tslice, "\n")
 
 struct LLM:
     # store token ids so we can update token embeddings
@@ -540,11 +595,11 @@ struct LLM:
     ]
     var embedded_X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
     # to take tokens and create a valid input:
+    
     var embedding_weights: EmbeddingWeights
     # attention blocks
-    var blocks: InlineArray[
-        TransformerBlock, ModelParams.num_transformer_blocks
-    ]
+    #var blocks: InlineArray[TransformerBlock, ModelParams.num_transformer_blocks]
+    var blocks: List[TransformerBlock]#(length = ModelParams.num_transformer_blocks, fill = TransformerBlock.initRandom()
     # layer norm -> output layer -> final_ln_output
     var ln_final_weights: LayerNormWeights
     var output_weights: OutputWeights
@@ -560,9 +615,15 @@ struct LLM:
         self.input_token_ids = type_of(self.input_token_ids)(
             alloc[Scalar[token_itype]](ModelParams.seq_len)
         ).fill(0)
+        #self.input_token_ids = zeroTensorHeap[token_itype, Layout.row_major(ModelParams.seq_len)]()
         self.embedded_X = zeroTensorHeap[TransformerBlock.X_layout]()
         self.embedding_weights = EmbeddingWeights.initRandom()
-        self.blocks = type_of(self.blocks)(fill=TransformerBlock.initRandom())
+        #self.blocks = type_of(self.blocks)(fill=TransformerBlock.initRandom())
+        # this will create a single temp TransformerBlock, copy it to each location, then delete the temp
+        #self.blocks = type_of(self.blocks)(length = ModelParams.num_transformer_blocks, fill = TransformerBlock.initRandom())
+        self.blocks = type_of(self.blocks)(capacity = ModelParams.num_transformer_blocks)
+        for i in range(ModelParams.num_transformer_blocks):
+            self.blocks[i] = TransformerBlock.initRandom()
         self.ln_final_weights = LayerNormWeights.initRandom()
         self.output_weights = OutputWeights.initRandom()
         self.final_ln_output = zeroTensorHeap[TransformerBlock.X_layout]()
@@ -572,32 +633,27 @@ struct LLM:
         mut self,
         token_ids: List[Int],  # TODO: should this be InlineArray[Int, seq_len]
         out output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin],
-        display: Bool = False
     ):
         """
         Caller needs to free memory of final output.
         """
-        fn printTensorSlice[layout: Layout](tensor: LayoutTensor[ftype, layout, MutAnyOrigin], name: String):
-            print("Tensor", name, ":\n")
-            comptime tile = 4
-            var tslice = tensor.slice[Slice(0, tile), Slice(0, tile), IndexList[2](0,1)](IndexList[1](0))
-            print(tslice, "\n")
+        print("+" * 100)
         # assert_equal(ModelParams.seq_len, len(tokens))
         self.embedding_weights.embedTokens(token_ids, self.embedded_X)
         #print("EMBEDDED X:\n", self.embedded_X,"\n\n")
-        printTensorSlice(self.embedded_X, "embedded X")
+        printTensorSlice(self.embedded_X, "embedded X", display)
 
         var block_output = self.embedded_X.copy()
         for i in range(len(self.blocks)):
             if display:
                 print("LLM TransformerBlock", i)
             var ffn_out_temp = LayoutTensor[
-                ftype, TransformerBlock.ffn_out_layout, MutAnyOrigin
+                ftype, TransformerBlock.X_layout, MutAnyOrigin
             ].stack_allocation()
             self.blocks[i].forward(block_output, ffn_out_temp)
             self.blocks[i].ffn_out.copy_from(ffn_out_temp)
             block_output = self.blocks[i].ffn_out
-            printTensorSlice(self.blocks[i].ffn_out, "block " + String(i) + " ffn_out")
+            printTensorSlice(self.blocks[i].ffn_out, "block " + String(i) + " ffn_out", display)
 
         if display:
             print("LLM forward blocks done")
@@ -607,7 +663,7 @@ struct LLM:
             self.ln_final_weights.beta,
             self.final_ln_output,
         )
-        printTensorSlice(self.final_ln_output, "final ln output")
+        printTensorSlice(self.final_ln_output, "final ln output", display)
 
         if display:
             print("Final linear layer...")
@@ -618,7 +674,7 @@ struct LLM:
             self.output_weights.b,
             output,
         )
-        printTensorSlice(output, "final output")
+        printTensorSlice(output, "final output", display)
         self.logits = output.copy()
         # naiveSoftmax(output)
 
@@ -640,6 +696,13 @@ struct LLM:
         return max_idx
 
     fn __del__(deinit self):
-        print("LLM __del__()")
+        print(coloredString("LLM __del__()", ColorsEnum.COLOR_PURPLE))
         self.input_token_ids.ptr.free()
+        self.embedded_X.ptr.free()
+        self.embedding_weights.freeMemory()
+        for i in range(len(self.blocks)):
+            self.blocks[i].freeMemory()
+        self.ln_final_weights.freeMemory()
+        self.output_weights.freeMemory()
+        self.final_ln_output.ptr.free()
         self.logits.ptr.free()

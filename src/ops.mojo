@@ -22,7 +22,8 @@ fn weightAndBias[layout_input: Layout,
                 biases: LayoutTensor[ftype, layout_bias, MutAnyOrigin],
                 output: LayoutTensor[ftype, layout_output, MutAnyOrigin]) -> None:
 
-    dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
+    #dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
+    naiveDotProduct(input, weights, output)
 
     #@parameter
     for i in range(output.shape[0]()):
@@ -64,6 +65,7 @@ fn dotProductTiledVectorizedParallelized[layout_a: Layout,
 
             for ti in range(tile_size):
                 for tj in range(tile_size):
+                    
                     @parameter
                     fn dot_product[width: Int](tk: Int) unified {mut}:
                         var v1 = a_tile.load[width](ti, tk)
@@ -80,7 +82,7 @@ fn naiveDotProduct[layout_a: Layout,
             layout_c: Layout](
             a: LayoutTensor[ftype, layout_a],
             b: LayoutTensor[ftype, layout_b],
-            mut c: LayoutTensor[ftype, layout_c, MutAnyOrigin]) -> None:
+            c: LayoutTensor[ftype, layout_c, MutAnyOrigin]) -> None:
     comptime rows = a.shape[0]()
     comptime inner = a.shape[1]() # == b.shape[0]()
     comptime cols = b.shape[1]()
@@ -89,8 +91,8 @@ fn naiveDotProduct[layout_a: Layout,
         for j in range(cols):
             var temp: sftype = 0.0
             for k in range(inner):
-                temp += rebind[sftype](a[b_num, i, k] * b[k, j])
-            c[b_num, i, j] = temp
+                temp += rebind[sftype](a[i, k] * b[k, j])
+            c[i, j] = temp
 
 fn dotProductSlices[layout_a: Layout,
               layout_b: Layout,
@@ -162,7 +164,7 @@ fn layerNorm[layout_input: Layout,
     this normalizes each d_model separately.
     """
     comptime seq_len = x.shape[0]()
-    comptime d_model = x.shape[1]()
+    comptime d_model = x.shape[1]() # == gamma and beta's shape of [d_model,]
 
     #@parameter
     for sl in range(seq_len):
@@ -203,7 +205,8 @@ fn feedForward[layout_x: Layout,
     Linear layers where the middle / hidden
     buffer is of a higher dimension, d_ff.
     """
-    dotProductTiledVectorizedParallelized(x, w0, hidden)
+    #dotProductTiledVectorizedParallelized(x, w0, hidden)
+    naiveDotProduct(x, w0, hidden)
     weightAndBias(x, w0, b0, hidden)
     act_fn.forward(hidden)
     weightAndBias(hidden, w1, b1, output)
@@ -230,17 +233,26 @@ fn naiveAttention[layout0: Layout,
                           output: LayoutTensor[ftype, layout3, MutAnyOrigin]) -> None:
     comptime d_k = Q.shape[1]()
     # modifes scores in-place
+    
     #var KT = layoutTensorDataTranspose2D[K.shape[0](), K.shape[1]()](K)
-    var KT = LayoutTensor[ftype, K.layout.transpose(), MutAnyOrigin](InlineArray[sftype, K.layout.size()](fill = 0.0))
+    var KT = LayoutTensor[ftype, K.layout.transpose(), MutAnyOrigin].stack_allocation().fill(0.0)
+    _ = """
+    for i in range(K.shape[0]()):
+        for j in range(K.shape[1]()):
+            KT[j, i] = K[i, j]
+    """
     KT.copy_from(K)
-    dotProductTiledVectorizedParallelized(Q, KT, scores)
+    
+    #dotProductTiledVectorizedParallelized(Q, KT, scores)
+    naiveDotProduct(Q, KT, scores)
     scores = scores / sqrt(d_k)
     scores_probs.copy_from(scores)
     # modifies scores_probs in-place
     naiveSoftmax(scores_probs)
 
     # modifies output in-place
-    dotProductTiledVectorizedParallelized(scores_probs, V, output)
+    #dotProductTiledVectorizedParallelized(scores_probs, V, output)
+    naiveDotProduct(scores_probs, V, output)
 
     # AT A HIGH LEVEL THIS PERFORMED:
     #var scores = Q @ KT / sqrt(d_k)

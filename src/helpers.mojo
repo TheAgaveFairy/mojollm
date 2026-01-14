@@ -59,3 +59,15 @@ fn compareBuffers(a: UnsafePointer[Scalar[ftype]], b: UnsafePointer[sftype], len
             return False
     return True
 
+struct ColorsEnum():
+    comptime COLOR_RESET =  "\x1b[0m"
+    comptime COLOR_WHITE =  "\x1b[37"
+    comptime COLOR_GREEN =  "\x1b[32m"
+    comptime COLOR_RED =    "\x1b[31m"
+    comptime COLOR_BLUE =   "\x1b[34m"
+    comptime COLOR_YELLOW = "\x1b[33m"
+    comptime COLOR_PURPLE = "\x1b[35m"
+
+fn coloredString(str: String, color: String = ColorsEnum.COLOR_YELLOW) -> String:
+    return String(color + str + ColorsEnum.COLOR_RESET)
+

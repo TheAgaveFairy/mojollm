@@ -3,6 +3,7 @@
 !.pixi/config.toml
 
 iterator.mojo
+lifetimes.mojo
 tokenizer
 
 perf.data*

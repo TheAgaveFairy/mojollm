@@ -4,8 +4,9 @@ from time import perf_counter_ns
 from pathlib import Path
 from testing import assert_equal
 from layout import Layout, LayoutTensor
+from benchmark.compiler import keep
 
-from helpers import systemInfo, randTensorHeap
+from helpers import systemInfo, randTensorHeap, ColorsEnum, coloredString
 from attention import ftype, LLM, TransformerBlock, ModelParams
 from tokenizer import ASCIITokenizer
 from cliparser import TokenizerParser
@@ -40,7 +41,7 @@ fn tempPrintOutput[layout: Layout](output: LayoutTensor[ftype, layout, MutAnyOri
     print()
 
 fn main() raises:
-    seed(42)
+    seed(420)
     systemInfo[ftype]()
 
     var args = TokenizerParser()
@@ -61,8 +62,12 @@ fn main() raises:
                     var output = llm.forward(tok_list)
                     tempPrintOutput(output)
                     var predicted_token = llm.getNextTokenGreedy()
-                    print("predicted token:", tokenizer.decodeToken(predicted_token))
+                    print("predicted token:", coloredString(tokenizer.decodeToken(predicted_token)))
             var end = perf_counter_ns()
+            keep(llm)
+            keep(llm.ln_final_weights)
+            keep(llm.embedding_weights)
+            keep(llm.blocks)
             print("time", (end - start) // 1_000 , "us for", times, "runs")
 
     except e:
