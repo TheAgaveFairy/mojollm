@@ -1,76 +1,97 @@
+# for reflection
 from layout import Layout, LayoutTensor
-from memory import memset_zero
 from reflection import struct_field_types, struct_field_names, struct_field_count, get_type_name
+from attention import Weights
+
+# for allocation arena
+from memory import memset_zero
 from sys import stderr
 from sys.info import size_of, align_of
+from testing import assert_equal, TestSuite
+from os import abort
 
-from attention import ftype, sftype, Weights
-
+comptime ftype = DType.float32
+comptime sftype = Scalar[ftype]
 comptime itype = DType.uint16
-comptime sitype  = Scalar[itype]
+comptime sitype = Scalar[itype]
 
 struct TestWeights(Weights):
+    var arena: BumpArenaAllocator
+
     comptime layout = Layout.row_major(7)
     var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
 
-    fn __init__(out self):
-        self.a = type_of(self.a)(alloc[sftype](self.a.layout.size())).fill(0.0)
+    fn __init__(out self, arena: BumpArenaAllocator):
+        self.arena = arena
+        self.a = type_of(self.a)(self.arena.alloc[sftype](self.a.layout.size())).fill(3.0)
 
     @staticmethod
-    fn initRandom(out self: Self, std: Float64 = 0.02):
-        self = Self()
+    fn sizeInBytes() -> Int:
+        return Self.layout.size() * size_of[ftype]()
+
+    @staticmethod
+    fn initRandom(out self: Self, arena: BumpArenaAllocator, std: Float64 = 0.02):
+        self = Self(arena)
         _ = self.a.fill(1.0)
 
     fn freeMemory(mut self):
         self.a.ptr.free()
 
 struct TestContainer():
+    var arena: BumpArenaAllocator
+
     comptime layout = Layout.row_major(5)
     var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
     var sub_weights: TestWeights
 
     fn __init__(out self):
-        self.a = type_of(self.a)(alloc[sftype](self.a.layout.size())).fill(0.0)
-        self.sub_weights = TestWeights.initRandom()
+        self.arena = type_of(self.arena)(self.sizeInBytes() + TestWeights.sizeInBytes())
+        self.a = type_of(self.a)(self.arena.alloc[sftype](self.a.layout.size())).fill(1.0)
+        self.sub_weights = TestWeights.initRandom(self.arena)
+
+    @staticmethod
+    fn sizeInBytes() -> Int:
+        return Self.layout.size() * size_of[sftype]()
 
     fn __del__(deinit self):
         pass
         #self.a.ptr.free()
         #self.sub_weights.a.ptr.free()
 
-struct ClaudeArena():
+struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
+    comptime __copyinit__is_trivial = True
+    comptime __moveinit__is_trivial = True
     # TODO: return Spans?
     """
-    Simple bump allocator. Allocates sequentially from a buffer.
+    Simple bump allocator. Minor design help from Claude 4.5.
     """
     var buffer: UnsafePointer[UInt8, MutAnyOrigin]
     var capacity: Int
-    var offset: Int  # Current allocation position
+    var offset: Int
     
-    fn __init__(out self, capacity_bytes: Int):
-        self.buffer = alloc[UInt8](capacity_bytes)
+    fn __init__(out self, capacity_bytes: Int, extra_space_factor: Float64 = 0.0):
+        var expanded_size = capacity_bytes + Int(capacity_bytes * extra_space_factor)
+        self.buffer = alloc[UInt8](expanded_size)
         self.capacity = capacity_bytes
         self.offset = 0
     
     fn __del__(deinit self):
-        self.buffer.free()
+        print("BumpArenaAllocator __del__()")
+        pass
+        #self.buffer.free()
     
-    fn alloc[T: AnyType](mut self, count: Int = 1) raises -> UnsafePointer[T, MutAnyOrigin]:
+    fn alloc[T: AnyType](mut self, count: Int = 1) -> UnsafePointer[T, MutAnyOrigin]:
         """Allocate space for `count` items of type T."""
         var size = size_of[T]() * count
         var alignment = align_of[T]()
         
-        # Align offset
         var aligned_offset = (self.offset + alignment - 1) & ~(alignment - 1)
         
-        # Check capacity
         if aligned_offset + size > self.capacity:
             # Could auto-grow here, or just panic
-            #print("Arena out of memory!", file=stderr)
-            raise Error("Arena out of memory!")
-            #return UnsafePointer[T]()
+            abort("Arena out of memory! Aborting!")
+            #raise Error("Arena out of memory!")
         
-        # Bump the pointer
         var ptr = (self.buffer + aligned_offset).bitcast[T]()
         self.offset = aligned_offset + size
         
@@ -87,52 +108,8 @@ struct ClaudeArena():
         memset_zero(self.buffer, self.capacity)
         self.offset = 0
 
-struct ArenaBumpAllocator():
-    # TODO: return spans?
-    """
-    Since every bit of data in here will be of 'sftype', we will use that as
-    the base unit instead of a more traditional "bytes" approach.
-
-    However, that does mean if we want to have mixed precision, have the uint16
-    token layer in this arena, etc, then that will have to change.
-
-    This Arena offers two main benefits: loading and saving the model becomes a
-    very simple operation, and there might be some performance gains.
-    """
-    var buffer: UnsafePointer[sftype, MutAnyOrigin]
-    var capacity: Int
-    var offset: Int
-
-    fn __init__(out self, capacity: Int):
-        self.buffer = alloc[sftype](capacity)
-        self.capacity = capacity
-        self.offset = 0
-
-    fn alloc(mut self, count: Int) raises -> UnsafePointer[sftype, MutAnyOrigin]:
-        if self.offset + count > self.capacity:
-            raise Error("Out of memory in arena!")
-    
-        var pointer = self.buffer + self.offset
-        self.offset += count
-        print("allocating", String(count), get_type_name[sftype](), "begin", Int(pointer), "->", Int(pointer + count))
-        return pointer
-
-    fn reset(mut self):
-        self.offset = 0
-
-    fn clear(mut self):
-        memset_zero(self.buffer, self.capacity)
-        self.offset = 0
-
-fn calcSize() -> Int:
-    #comptime result = TestContainer.layout.size() + TestWeights.layout.size()
-    var result = 0
-    result += 5
-    result += 7
-    result += 3
-    return result
-
 fn printFields[T: AnyType]():
+    """Testing new reflection features."""
     print(get_type_name[T](), "has fields:")
     comptime f_types = struct_field_types[T]()
     comptime f_names = struct_field_names[T]()
@@ -141,10 +118,13 @@ fn printFields[T: AnyType]():
         print("\t", f_names[i], ":", get_type_name[f_types[i]]())
 
 fn printTypeInfo[T: DType]():
+    """Prints type name, size, and alignment."""
     comptime thing = "{}:\n\tsize: {}, align {}".format(T, size_of[Scalar[T]](), align_of[Scalar[T]]())
     print(thing)
 
-fn main():
+def main():
+    """Tests here. Some reflection examples to start if you `uncomment`."""
+    _ = """
     printTypeInfo[ftype]()
     printTypeInfo[itype]()
     print("Some reflection tests...")
@@ -152,27 +132,65 @@ fn main():
     comptime T = type_of(test_weights)
     printFields[T]()
     print("Arena time...")
+    """
+    test_nested_arena()
 
-    # running this function is possible at compile time, confirmed
-    comptime size = calcSize()
-    
-    print("Simple, safe arena:")
-    var dumb_arena = ArenaBumpAllocator(size)
-    try:
-        var p0 = dumb_arena.alloc(5)
-        var p1 = dumb_arena.alloc(7)
-        var _test = dumb_arena.alloc(3)
-    except e:
-        print(e)
+    var suite = TestSuite()
+    suite.test[test_allocator_offsets]()
+    #suite.test[test_allocation_failure]()
+    suite.test[test_allocator_clear]()
+    suite.test[test_allocator_reset]()
+    suite^.run()
 
-    print("Claude's 'smarter' arena:")
+def test_allocator_offsets():
     var size_in_bytes = 12 * size_of[sftype]() + size_of[sitype]() * 3
-    var c_arena = ClaudeArena(size_in_bytes)
+    var c_arena = BumpArenaAllocator(size_in_bytes)
     try:
         var p0 = c_arena.alloc[sftype](5)
         var p1 = c_arena.alloc[sftype](7)
         # DIFFERENT TYPE BEING ALLOCATED
         var p2 = c_arena.alloc[sitype](3)
+        var end = p2 + 3 * size_of[sitype]()
+        
+        var size0 = Int(p1) - Int(p0)
+        var size1 = Int(p2) - Int(p1)
+        var size2 = Int(end) - Int(p2)
+
+        assert_equal(size0, 20) # 5 float32
+        assert_equal(size1, 28)
+        assert_equal(size2, 12)
     except e:
         print(e)
+        assert_equal(0, -1)
 
+def test_allocation_failure():
+    var arena = BumpArenaAllocator(5)
+    try:
+        var ptr = arena.alloc[sftype](10)
+    except e:
+        _ = e
+        assert_equal(0, 0)
+
+def test_allocator_clear():
+    var arena = BumpArenaAllocator(128)
+    var ptr = arena.alloc[sitype](10)
+    for i in range(10):
+        ptr[i] = 69
+    arena.clear()
+    for i in range(10):
+        assert_equal(ptr[i], 0)
+
+def test_allocator_reset():
+    var arena = BumpArenaAllocator(128)
+    var ptr0 = arena.alloc[UInt8](128)
+    arena.reset()
+    var ptr1 = arena.alloc[UInt8](128)
+    assert_equal(ptr0, ptr1)
+
+def test_nested_arena():
+    var tc = TestContainer() # allocates Arena itself
+    var tw_arena = BumpArenaAllocator(7 * size_of[sftype]())
+    var tw = TestWeights(tw_arena)
+
+    print(tw.a.ptr, tc.a.ptr, tc.sub_weights.a.ptr)
+    

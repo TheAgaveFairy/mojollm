@@ -25,10 +25,11 @@ fn splitInput(toks: List[Int]) -> List[List[Int]]:
     for i in range(0, num_sequences):
         var start = i * sl
         #var end = (i + 1) * sl
-        var temp = List[Int](capacity = ModelParams.seq_len)
+        var temp = List[Int](capacity = sl)
         for t in range(sl):
             temp.append(toks[start + t])
-        output.append(temp^)
+        if len(temp) == sl:
+            output.append(temp^)
     return output^
 
 fn tempPrintOutput[layout: Layout](output: LayoutTensor[ftype, layout, MutAnyOrigin]):
@@ -53,6 +54,7 @@ fn main() raises:
             var input_tokens = tokenizer.encode(text)
             var test_input = splitInput(input_tokens)
             #printIntSpan(test_input)
+            print("LLM Size In Bytes()", LLM.sizeInBytes())
             var llm = LLM()
             comptime times = 1
             var start = perf_counter_ns()
@@ -64,10 +66,6 @@ fn main() raises:
                     var predicted_token = llm.getNextTokenGreedy()
                     print("predicted token:", coloredString(tokenizer.decodeToken(predicted_token)))
             var end = perf_counter_ns()
-            keep(llm)
-            keep(llm.ln_final_weights)
-            keep(llm.embedding_weights)
-            keep(llm.blocks)
             print("time", (end - start) // 1_000 , "us for", times, "runs")
 
     except e:
