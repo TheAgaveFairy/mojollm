@@ -7,25 +7,35 @@ from memory import memset, memset_zero
 from attention import ftype, sftype, nelts
 
 comptime std_std_deviation = 0.5
+
+@always_inline("nodebug")
 fn fillTensorRand[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin], std: Float64 = std_std_deviation):
+    """Fills an existing LayoutTensor with a random, normal distribution."""
     randn(x.ptr, layout.size(), 0, std) # mean of zero
 
+@always_inline("nodebug")
 fn randTensorHeap[layout: Layout](std: Float64 = std_std_deviation) -> LayoutTensor[ftype, layout, MutAnyOrigin]:
+    """Heap allocates and returns a LayoutTensor filled with a random normal distribution."""
     var storage = alloc[sftype](layout.size())
     randn(storage, layout.size(), 0, 1)
     return LayoutTensor[ftype, layout, MutAnyOrigin](storage)
 
+@always_inline("nodebug")
 fn zeroTensorHeap[layout: Layout]() -> LayoutTensor[ftype, layout, MutAnyOrigin]:
+    """Heap allocates and returns a LayoutTensor filled with zeros."""
     var storage = alloc[sftype](layout.size())
     memset_zero(storage, layout.size())
     return LayoutTensor[ftype, layout, MutAnyOrigin](storage)
 
+@always_inline("nodebug")
 fn cleanFunctionName[func: fn() -> None]() -> String:
+    """Simple reflection."""
     var func_name = get_linkage_name[func]().split('(')[0]
     func_name = func_name.split('[')[0].split('::')[1]
     return func_name
 
 fn showProgress(progress: Int, total: Int):
+    """Simple progress bar. You'll want to print a newline when complete."""
     comptime bar_width = 50
 
     if progress == (total - 1):
@@ -44,6 +54,7 @@ fn showProgress(progress: Int, total: Int):
         print("]", round(ratio * 100, 1), "%", end="")
 
 fn systemInfo[ftype: DType]():
+    """Helps display SIMD capabilities on your machine."""
     comptime nelts = simd_width_of[ftype]()
     print("All tests are with dtype " + String(ftype) + " and comptime known lengths." +
           "\nYour machine gives:" +
@@ -52,10 +63,11 @@ fn systemInfo[ftype: DType]():
           "\n\tSIMD" + String(ftype) + "width:\t" + String(nelts) + '\n')
     
 fn compareBuffers(a: UnsafePointer[Scalar[ftype]], b: UnsafePointer[sftype], length: Int) -> Bool:
+    """Ensures two buffers are equal within some error bounds (floating point isn't perfect)."""
     comptime epsilon = 1e-6
     for i in range(length):
         if (a[i] < (b[i] - epsilon)) or (a[i] > (b[i] + epsilon)):
-            print("element i", i, ":", a[i], "!=", b[i])
+            print("element i", i, ":", a[i], "!=", b[i], file = stderr)
             return False
     return True
 

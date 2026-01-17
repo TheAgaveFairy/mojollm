@@ -80,6 +80,7 @@ fn main() raises:
             var end = perf_counter_ns()
             print("time", (end - start) // 1_000 , "us for", times, "runs")
             #print("Capacity {} offset {}".format(llm.arena.capacity, llm.arena.offset))
+            print("biases for QKV, ffn, consider looking up what W_o is, causal masking, comment things well, cross entropy loss, transformer grad buffers, optimizer trait")
 
     except e:
         print(e, file = stderr)

@@ -57,14 +57,10 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     var a: Int
     var b: Int
 
-    #fn __init__(out self, a: Int, b: Int):
-    #    self.a = a
-    #    self.b = b
-
     @staticmethod
     @always_inline("nodebug")
     fn fromRepr(repr: StringSlice) raises -> Self:
-        # not the safest but should be fine
+        """ Not the safest but should be fine."""
         #var had_space: Int = 1 if repr[0] == ' ' else 0
         var had_space = 0
         var stripped_repr = repr[1 + had_space :-1] # remove ()
@@ -97,54 +93,6 @@ struct ASCIITokenizer(Copyable, Movable):
         self.vocab_encode = type_of(self.vocab_encode)()
         self.special_tokens = type_of(self.special_tokens)()
 
-    fn train(mut self, text: StringSlice):
-        """
-        Byte Pair Encoding.
-        """
-        var num_merges = self.vocab_size - 256
-        print("Training with BPE to vocab size", self.vocab_size, "...")
-        var ids = Self.stringToTokenList(text)
-
-        for i in range(num_merges):
-            showProgress(i, num_merges)
-            var most_common_pair_count = 0
-            var most_common_pair = Pair.DUMMY # dummy values
-
-            var s = 256 + i
-            var pair_counts = self._countPairsIterative(ids, s) # returns an 's' x 's' "matrix"
-            for j, count in enumerate(pair_counts):
-                var a = j // s
-                var b = j % s
-
-                if count > most_common_pair_count:
-                    most_common_pair_count = count
-                    var pair = Pair(a, b)
-                    most_common_pair = pair
-
-            #print("MOST COMMON PAIR", String(256 + i), ":", most_common_pair.__repr__(), most_common_pair_count)
-            self.vocab_encode.append(most_common_pair)
-            ids = self._merge(ids, most_common_pair, s)
-        print()
-
-
-    fn regexpPreProcess(self, raw_text: String) -> List[List[Int]]:
-        var chunks = List[List[Int]]()
-        # var pattern = "'(?i:[sdmt]|ll|ve|re)|\\w+|[^\\w\\s]+|\\s+" #r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+"
-        _ = """
-        try:
-            var re = Python.import_module("re")
-            var matches = re.findall(pattern, raw_text)
-
-            for m in matches:
-                var chunk = List[Int]()
-                for byte in m.as_bytes():
-                    chunk.append(Int(byte))
-                chunks.append(chunk^)
-        except e:
-            print(e, file = stderr)
-        """
-        return chunks^
-
     @staticmethod
     fn boundaryProtect(raw_ids: List[Int]) -> TokenChunks:
         """
@@ -153,8 +101,8 @@ struct ASCIITokenizer(Copyable, Movable):
         Claude 4.5 Sonnet refined my skeleton attempt. Verbose, but looks good.
         """
         #Pattern approximation: r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+".
+        # TODO: add word beginning token ('220') and attach spaces to beginnings
         
-        #var boundary_idxs = List[Int]()
         var n = len(raw_ids)
         var chunks = TokenChunks(n) #conceptually a List[List[Int]]()
         var i = 0
@@ -286,16 +234,12 @@ struct ASCIITokenizer(Copyable, Movable):
 
             self.vocab_encode.append(most_common_pair)
             ids = self._mergeChunks(ids, most_common_pair, s)
-            _ = """
-            print("IDS")
-            for id in ids[:100]:
-                print(id, end = " ")
-            print("\n\n")
-            """
+            
         if debug_display:
             print()
 
     fn encode(self, text: StringSlice) -> List[Int]:
+        """Encodes some text into a List of our new token ids."""
         var ids = Self.stringToTokenList(text)
         for i, pair in enumerate(self.vocab_encode):
             var token_id = i + 256
@@ -304,6 +248,7 @@ struct ASCIITokenizer(Copyable, Movable):
         return ids^
             
     fn decode(self, tokens: List[Int]) raises -> String:
+        """Decodes a list of token ids into the original text."""
         var unmerged = tokens.copy()
         for i in range(len(self.vocab_encode) - 1, -1, -1): # LIFO
             var pair = self.vocab_encode[i]
@@ -319,9 +264,7 @@ struct ASCIITokenizer(Copyable, Movable):
         return String(unsafe_from_utf8 = bytes)
     
     fn exportVocab(self, filename: String):
-        """
-        For use with Claude 4.5's tsx visualizer.
-        """
+        """For use with Claude 4.5's tsx visualizer.html (which has bugs but that's ok)."""
         print("Exporting vocab for visualizer:", filename)
         try:
             with open(filename, "w") as f:
@@ -334,9 +277,7 @@ struct ASCIITokenizer(Copyable, Movable):
             print(e, file = stderr)
 
     fn save(self, filename: String) raises:
-        """
-        Text encoded, for now. Will make it produce binary file later.
-        """
+        """Saves as a plain text file, for now."""
         try:
             with open(filename, "w") as f:
                 f.write(self.vocab_encode)
@@ -348,11 +289,12 @@ struct ASCIITokenizer(Copyable, Movable):
 
     @staticmethod
     fn load(filename: String) raises -> Self:
+        """Undoes the save and loads with some minor protections."""
         var self = Self(0)
         try:
             with open(filename, "r") as f:
                 var lines = f.read().split('\n')
-                for i, line in enumerate(lines):
+                for i, line in enumerate(lines): 
                     if not len(line):
                         _ = lines.pop(i)
                 if len(lines) != 2:
@@ -399,9 +341,34 @@ struct ASCIITokenizer(Copyable, Movable):
         var result = String(unsafe_from_utf8=[Byte(x) for x in internal])
         return result
 
+    fn _merge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
+            """
+            We take in a read-only list of token ids and allocate new fresh memory.
+            """
+            var n = len(text_tokens)
+            var merged = List[Int](capacity = n)
+
+            var c = pair.a
+            var d = pair.b
+
+            var i = 0
+            while i < n:
+                var a = text_tokens[i]
+                var b = text_tokens[i + 1]
+                if i < n - 1 and (a == c and b == d):
+                    merged.append(token_id)
+                    i += 2
+                else:
+                    merged.append(text_tokens[i])
+                    i += 1
+            
+            return merged^
     fn _unmerge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
+        """Used for decode. Looks for compound tokens and replaces them with parts."""
         var n = len(text_tokens)
-        var unmerged = List[Int](capacity = n) # will be BIGGER than this at end
+        comptime extra_capacity_factor = 0.125 # could tune this to avoid reallocing
+        var bonus = Int(n * extra_capacity_factor)
+        var unmerged = List[Int](capacity = n + bonus) # might be BIGGER than this at end
         
         for _, token in enumerate(text_tokens):
             if token != token_id:
@@ -415,9 +382,7 @@ struct ASCIITokenizer(Copyable, Movable):
     @staticmethod
     @always_inline("nodebug")
     fn stringToTokenList(text: StringSlice) -> List[Int]:
-        """
-        Assuming ASCII only for now.
-        """
+        """Splits into bytes as Ints. UTF-8 or ASCII doesn't really matter."""
         var bytes = text.as_bytes()
         var n = len(bytes)
         var ids = List[Int](capacity = n)
@@ -425,80 +390,11 @@ struct ASCIITokenizer(Copyable, Movable):
             ids.append(Int(b))
         return ids^
 
-    @deprecated("use train(), this doesn't implement 'regexp' boundary protection and offers no real performance gain")
-    fn trainParallelized(mut self, text: StringSlice, threads: Int = num_logical_cores()):
-        """
-        Not actually much faster - abandoned.
-        """
-        print("Training with BPE to vocab size", self.vocab_size, " using", threads, "threads...")
-        var ids = Self.stringToTokenList(text)
-
-        var n = len(ids)
-        var toks_per_chunk = n // threads # or ceildiv(n, threads)
-
-        var num_merges = self.vocab_size - 256
-        for i in range(num_merges):
-            showProgress(i, num_merges)
-            var s = 256 + i
-            comptime itype = DType.int32
-            comptime sitype = Scalar[itype]
-            var pair_counts_global = List[sitype](length = s * s, fill = 0)
-            @parameter
-            fn parallelClosure(tid: Int):
-                var chunk_start = toks_per_chunk * tid
-                var chunk_end = min(n, toks_per_chunk * (tid + 1) + 1) # halo size of 1
-                var local_ids_slice = ids[chunk_start : chunk_end]
-                for j in range(len(local_ids_slice) - 1):
-                    var a = ids[chunk_start + j]
-                    var b = ids[chunk_start + j + 1]
-                    #pair_counts_global[a * s + b] += 1 # "should" be Atomic Add
-                    var temp_ptr = pair_counts_global.unsafe_ptr() + (a * s + b)
-                    _ = Atomic[itype].fetch_add(temp_ptr, 1)
-            parallelize[parallelClosure](threads)
-
-            var global_max_count: sitype = 0
-            var global_max_pair = Pair.DUMMY
-            for j, count in enumerate(pair_counts_global):
-                var a = j // s
-                var b = j % s
-                if count > global_max_count:
-                    global_max_count = count
-                    global_max_pair = Pair(a, b)
-
-            self.vocab_encode.append(global_max_pair)
-            ids = self._merge(ids, global_max_pair, s)
-        print()
-
-    fn _merge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
-        """
-        We take in a read-only list of token ids and allocate new fresh memory.
-        """
-        var n = len(text_tokens)
-        var merged = List[Int](capacity = n)
-
-        var c = pair.a
-        var d = pair.b
-
-        var i = 0
-        while i < n:
-            var a = text_tokens[i]
-            var b = text_tokens[i + 1]
-            if i < n - 1 and (a == c and b == d):
-                merged.append(token_id)
-                i += 2
-            else:
-                merged.append(text_tokens[i])
-                i += 1
-        
-        return merged^
-
     fn _mergeChunks(self, read chunks: TokenChunks, pair: Pair, new_token_id: Int) -> TokenChunks:
-        """
-        We take in a read-only list of token ids and allocate new fresh memory.
-        """
+        """  We take in a read-only list of token ids and allocate new fresh memory."""
         var tokens_capacity = len(chunks.tokens)
         var num_chunks = len(chunks.boundaries)
-        var merged = TokenChunks(tokens_capacity, num_chunks)
+        var merged = TokenChunks(tokens_capacity, num_chunks) # capacity won't get filled, that's ok!
 
         var c = pair.a
         var d = pair.b
@@ -524,7 +420,7 @@ struct ASCIITokenizer(Copyable, Movable):
 
     fn _countPairsChunks(self, chunks: TokenChunks, s: Int) -> List[Int]:
         """
-        For this Shakespeare dataset, the max counted pair is seen 27643 times.
+        For the Shakespeare dataset, the max counted pair is seen 27643 times.
         We could probably save a lot of memory by using [U]Int16, need be on a
         giant training dataset.
         """
@@ -535,35 +431,6 @@ struct ASCIITokenizer(Copyable, Movable):
                 var b = chunk[i + 1]
                 counts[a * s + b] += 1
         return counts^
-
-    fn _countPairsIterative(self, text_tokens: List[Int], s: Int) -> List[Int]:
-        """
-        For this Shakespeare dataset, the max counted pair is seen 27643 times.
-        We could probably save a lot of memory by using [U]Int16, need be.
-        """
-        var counts = List[Int](length = s * s, fill = 0)
-        var a = text_tokens[0]
-        var b = text_tokens[1]
-        for i in range(len(text_tokens) - 1):
-            counts[a * s + b] += 1
-            a = b
-            b = text_tokens[i + 1]
-        return counts^
-
-    fn _countPairsIterativeNew(self, text_tokens: List[Int], s: Int) -> Pair:
-        var counts = List[Int](length = s * s, fill = 0)
-        var a = text_tokens[0]
-        var b = text_tokens[1]
-        var most = 0
-        var pair = Pair.DUMMY
-        for i in range(len(text_tokens) - 1):
-            counts[a * s + b] += 1
-            if counts[a * s + b] > most:
-                most = counts[a * s + b]
-                pair = Pair(a, b)
-            a = b
-            b = text_tokens[i + 1]
-        return pair
 
     fn __copyinit__(out self, other: Self):
         self.vocab_size = other.vocab_size # we'll BPE up to this number
@@ -638,6 +505,7 @@ fn compareVocabsTest(a: ASCIITokenizer, b: ASCIITokenizer) -> Bool:
     
     return seen == n
 
+@deprecated("No other training methods implemented any longer.")
 fn compareTrainingTimesTest(text: StringSlice, vocab_size: Int = 500, runs: Int = 5) -> Float64:
     var tok_a = ASCIITokenizer(vocab_size)
     var tok_b = ASCIITokenizer(vocab_size)
@@ -645,7 +513,7 @@ fn compareTrainingTimesTest(text: StringSlice, vocab_size: Int = 500, runs: Int 
     var accum = 0.0
     for r in range(runs):
         var start = perf_counter_ns()
-        tok_a.train(text)
+        #tok_a.train(text)
         var mid = perf_counter_ns()
         #tok_b.trainParallelized(text, num_logical_cores())
         tok_b.trainWithProtections(text)

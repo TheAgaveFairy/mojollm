@@ -15,49 +15,6 @@ comptime sftype = Scalar[ftype]
 comptime itype = DType.uint16
 comptime sitype = Scalar[itype]
 
-struct TestWeights(Weights):
-    var arena: BumpArenaAllocator
-
-    comptime layout = Layout.row_major(7)
-    var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
-
-    fn __init__(out self, arena: BumpArenaAllocator):
-        self.arena = arena
-        self.a = type_of(self.a)(self.arena.alloc[sftype](self.a.layout.size())).fill(3.0)
-
-    @staticmethod
-    fn sizeInBytes() -> Int:
-        return Self.layout.size() * size_of[ftype]()
-
-    @staticmethod
-    fn initRandom(out self: Self, arena: BumpArenaAllocator, std: Float64 = 0.02):
-        self = Self(arena)
-        _ = self.a.fill(1.0)
-
-    fn freeMemory(mut self):
-        self.a.ptr.free()
-
-struct TestContainer():
-    var arena: BumpArenaAllocator
-
-    comptime layout = Layout.row_major(5)
-    var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
-    var sub_weights: TestWeights
-
-    fn __init__(out self):
-        self.arena = type_of(self.arena)(self.sizeInBytes() + TestWeights.sizeInBytes())
-        self.a = type_of(self.a)(self.arena.alloc[sftype](self.a.layout.size())).fill(1.0)
-        self.sub_weights = TestWeights.initRandom(self.arena)
-
-    @staticmethod
-    fn sizeInBytes() -> Int:
-        return Self.layout.size() * size_of[sftype]()
-
-    fn __del__(deinit self):
-        pass
-        #self.a.ptr.free()
-        #self.sub_weights.a.ptr.free()
-
 struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
@@ -76,6 +33,7 @@ struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
         self.offset = 0
     
     fn __del__(deinit self):
+        # TODO: I think we can reinstate the self-clearing
         #print("BumpArenaAllocator __del__()")
         pass
         #self.buffer.free()
@@ -108,20 +66,6 @@ struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
         memset_zero(self.buffer, self.capacity)
         self.offset = 0
 
-fn printFields[T: AnyType]():
-    """Testing new reflection features."""
-    print(get_type_name[T](), "has fields:")
-    comptime f_types = struct_field_types[T]()
-    comptime f_names = struct_field_names[T]()
-    @parameter
-    for i in range(struct_field_count[T]()):
-        print("\t", f_names[i], ":", get_type_name[f_types[i]]())
-
-fn printTypeInfo[T: DType]():
-    """Prints type name, size, and alignment."""
-    comptime thing = "{}:\n\tsize: {}, align {}".format(T, size_of[Scalar[T]](), align_of[Scalar[T]]())
-    print(thing)
-
 def main():
     """Tests here. Some reflection examples to start if you `uncomment`."""
     _ = """
@@ -142,6 +86,21 @@ def main():
     suite.test[test_allocator_clear]()
     suite.test[test_allocator_reset]()
     suite^.run()
+
+
+fn printFields[T: AnyType]():
+    """Testing new reflection features."""
+    print(get_type_name[T](), "has fields:")
+    comptime f_types = struct_field_types[T]()
+    comptime f_names = struct_field_names[T]()
+    @parameter
+    for i in range(struct_field_count[T]()):
+        print("\t", f_names[i], ":", get_type_name[f_types[i]]())
+
+fn printTypeInfo[T: DType]():
+    """Prints type name, size, and alignment."""
+    comptime thing = "{}:\n\tsize: {}, align {}".format(T, size_of[Scalar[T]](), align_of[Scalar[T]]())
+    print(thing)
 
 def test_allocator_offsets():
     var size_in_bytes = 12 * size_of[sftype]() + size_of[sitype]() * 3
@@ -196,3 +155,46 @@ def test_nested_arena():
 
     print(tw.a.ptr, tc.a.ptr, tc.sub_weights.a.ptr)
     
+
+struct TestWeights(Weights):
+    var arena: BumpArenaAllocator
+
+    comptime layout = Layout.row_major(7)
+    var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
+
+    fn __init__(out self, arena: BumpArenaAllocator):
+        self.arena = arena
+        self.a = type_of(self.a)(self.arena.alloc[sftype](self.a.layout.size())).fill(3.0)
+
+    @staticmethod
+    fn sizeInBytes() -> Int:
+        return Self.layout.size() * size_of[ftype]()
+
+    @staticmethod
+    fn initRandom(out self: Self, arena: BumpArenaAllocator, std: Float64 = 0.02):
+        self = Self(arena)
+        _ = self.a.fill(1.0)
+
+    fn freeMemory(mut self):
+        self.a.ptr.free()
+
+struct TestContainer():
+    var arena: BumpArenaAllocator
+
+    comptime layout = Layout.row_major(5)
+    var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
+    var sub_weights: TestWeights
+
+    fn __init__(out self):
+        self.arena = type_of(self.arena)(self.sizeInBytes() + TestWeights.sizeInBytes())
+        self.a = type_of(self.a)(self.arena.alloc[sftype](self.a.layout.size())).fill(1.0)
+        self.sub_weights = TestWeights.initRandom(self.arena)
+
+    @staticmethod
+    fn sizeInBytes() -> Int:
+        return Self.layout.size() * size_of[sftype]()
+
+    fn __del__(deinit self):
+        pass
+        #self.a.ptr.free()
+        #self.sub_weights.a.ptr.free()

@@ -21,11 +21,14 @@ fn weightAndBias[layout_input: Layout,
                 weights: LayoutTensor[ftype, layout_weights, MutAnyOrigin],
                 biases: LayoutTensor[ftype, layout_bias, MutAnyOrigin],
                 output: LayoutTensor[ftype, layout_output, MutAnyOrigin]) -> None:
+    """
+    Does a dot product and adds a bias to output which is modified in-place.
+    """
 
     #dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
     naiveDotProduct(input, weights, output)
 
-    #@parameter
+    #@parameter # explodes compile time
     for i in range(output.shape[0]()):
         #@parameter
         for j in range(output.shape[1]()):
@@ -77,12 +80,16 @@ fn dotProductTiledVectorizedParallelized[layout_a: Layout,
     parallelize[parallel_closure](num_output_tiles)
     #benchmark.compiler.keep(c)
 
+@always_inline("nodebug")
 fn naiveDotProduct[layout_a: Layout,
             layout_b: Layout,
             layout_c: Layout](
             a: LayoutTensor[ftype, layout_a],
             b: LayoutTensor[ftype, layout_b],
             c: LayoutTensor[ftype, layout_c, MutAnyOrigin]) -> None:
+    """
+    Very simple matrix multiplication. No SIMD, parallelization, etc..
+    """
     comptime rows = a.shape[0]()
     comptime inner = a.shape[1]() # == b.shape[0]()
     comptime cols = b.shape[1]()
@@ -94,6 +101,7 @@ fn naiveDotProduct[layout_a: Layout,
                 temp += rebind[sftype](a[i, k] * b[k, j])
             c[i, j] = temp
 
+@deprecated("Not sure this makes sense.")
 fn dotProductSlices[layout_a: Layout,
               layout_b: Layout,
               layout_c: Layout](
@@ -131,7 +139,7 @@ fn dotProductSlices[layout_a: Layout,
 
 fn naiveSoftmax[layout: Layout](mut x: LayoutTensor[ftype, layout, MutAnyOrigin]) -> None:
     """
-    In-place, stable softmax.
+    In-place, stable softmax. Modifies in-place.
     """
     comptime rows = x.shape[0]()
     comptime cols = x.shape[1]()
@@ -162,6 +170,7 @@ fn layerNorm[layout_input: Layout,
     """
     For a tensor of shape (seq_len, d_model),
     this normalizes each d_model separately.
+    Modifies output in-place.
     """
     comptime seq_len = x.shape[0]()
     comptime d_model = x.shape[1]() # == gamma and beta's shape of [d_model,]
@@ -231,17 +240,15 @@ fn naiveAttention[layout0: Layout,
                           mut scores: LayoutTensor[ftype, layout2, MutAnyOrigin],
                           mut scores_probs: LayoutTensor[ftype, layout2, MutAnyOrigin],
                           output: LayoutTensor[ftype, layout3, MutAnyOrigin]) -> None:
+    """
+    Modifies output in-place. Biases not yet supported.
+    """
     comptime d_k = Q.shape[1]()
     # modifes scores in-place
     
     #var KT = layoutTensorDataTranspose2D[K.shape[0](), K.shape[1]()](K)
     var KT = LayoutTensor[ftype, K.layout.transpose(), MutAnyOrigin].stack_allocation().fill(0.0)
-    _ = """
-    for i in range(K.shape[0]()):
-        for j in range(K.shape[1]()):
-            KT[j, i] = K[i, j]
-    """
-    #KT.copy_from(K)
+    #KT.copy_from(K) # compiler "bug", kills compilation due to unrolling
     _myTensorCopyFrom(src = K, dest = KT)
     
     #dotProductTiledVectorizedParallelized(Q, KT, scores)
@@ -260,6 +267,6 @@ fn naiveAttention[layout0: Layout,
     naiveDotProduct(scores_probs, V, output)
 
     # AT A HIGH LEVEL THIS PERFORMED:
-    #var scores = Q @ KT / sqrt(d_k)
+    #var scores = Q @ K^T / sqrt(d_k)
     #var atten = softmax(scores)
     #return attn @ V

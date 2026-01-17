@@ -1,4 +1,5 @@
 from iter import Iterator, Iterable
+from testing import TestSuite, assert_equal
 
 @fieldwise_init
 struct TokenChunks(Iterable, Copyable):
@@ -34,12 +35,14 @@ struct TokenChunks(Iterable, Copyable):
         self.boundaries = type_of(self.boundaries)(capacity = num_chunks) # static
 
     fn addChunk(mut self, chunk: List[Int]):
+        """Automatically calculates boundary and extends the tokens list."""
         idx = len(self.tokens)
         for tok in chunk:
             self.tokens.append(tok)
         self.boundaries.append(idx)
 
     fn get(self, chunk_idx: Int) -> Optional[Span[Int, origin_of(self.tokens)]]:
+        """Returns an optional Span of the requested token_ids if the chunk_idx is valid."""
         var num_chunks = len(self.boundaries)
         if chunk_idx >= num_chunks:
             return None
@@ -81,10 +84,14 @@ struct ChunkIterator(Iterator):
         self.current += 1
         return self.tokens[start : end]
 
-fn main():
+def main():
     print("Tests passed?", tests())
+    var suite = TestSuite()
+    suite.test[testAddChunk]()
+    suite.test[testGetChunk]()
+    suite^.run()
 
-fn tests() -> Bool:
+def testAddChunk():
     var tokens = [1,2,3,4,5,6]
     var boundaries = [0,3,4]
     var my_iterable = TokenChunks(tokens^, boundaries^)
@@ -97,8 +104,13 @@ fn tests() -> Bool:
         add_chunk_result += '|'
 
     #print(add_chunk_result)
-    var add_chunk_passed = add_chunk_result == "1,2,3,|4,|5,6,|7,8,9,|10,|"
-    
+    assert_equal(add_chunk_result, "1,2,3,|4,|5,6,|7,8,9,|10,|")
+
+def testGetChunk():
+    var tokens = [1,2,3,4,5,6]
+    var boundaries = [0,3,4]
+    var my_iterable = TokenChunks(tokens^, boundaries^)
+
     var get_result = ""
     var chunk_zero = my_iterable.get(0)
     if chunk_zero:
@@ -106,9 +118,5 @@ fn tests() -> Bool:
         for c in iterable:
             get_result += "{},".format(c)
         get_result += '|'
-    
-    #print(result)
-    var get_passed = get_result == "1,2,3,|"
-
-    return add_chunk_passed and get_passed
+    assert_equal(get_result, "1,2,3,|")
 
