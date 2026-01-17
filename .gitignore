@@ -5,7 +5,8 @@
 iterator.mojo
 lifetimes.mojo
 tokenizer
-
+testrun*
+bugreport*
 perf.data*
 out.perf
 out.folded

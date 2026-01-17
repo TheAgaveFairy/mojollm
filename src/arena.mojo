@@ -1,7 +1,7 @@
 # for reflection
 from layout import Layout, LayoutTensor
 from reflection import struct_field_types, struct_field_names, struct_field_count, get_type_name
-from attention import Weights
+from attention import Weights, ModelParams
 
 # for allocation arena
 from memory import memset_zero
@@ -76,7 +76,7 @@ struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
         self.offset = 0
     
     fn __del__(deinit self):
-        print("BumpArenaAllocator __del__()")
+        #print("BumpArenaAllocator __del__()")
         pass
         #self.buffer.free()
     
@@ -97,7 +97,7 @@ struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
         
         #print("allocating", String(count), get_type_name[T](), "begin", Int(ptr), "->", Int(ptr + count))
         return ptr
-    
+
     fn reset(mut self):
         """Free all allocations at once by resetting the offset."""
         self.offset = 0
@@ -133,11 +133,12 @@ def main():
     printFields[T]()
     print("Arena time...")
     """
+    printFields[ModelParams]()
     test_nested_arena()
 
     var suite = TestSuite()
     suite.test[test_allocator_offsets]()
-    #suite.test[test_allocation_failure]()
+    #suite.test[test_allocation_failure]() # now panics/aborts instead of raises
     suite.test[test_allocator_clear]()
     suite.test[test_allocator_reset]()
     suite^.run()
@@ -163,6 +164,7 @@ def test_allocator_offsets():
         print(e)
         assert_equal(0, -1)
 
+@deprecated("alloc now aborts instead of raises")
 def test_allocation_failure():
     var arena = BumpArenaAllocator(5)
     try:

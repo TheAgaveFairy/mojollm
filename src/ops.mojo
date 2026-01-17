@@ -10,7 +10,7 @@ from time import perf_counter_ns
 from algorithm.functional import vectorize, parallelize
 from kernels.nn.softmax import softmax
 
-from attention import ftype, sftype, nelts
+from attention import ftype, sftype, nelts, _myTensorCopyFrom
 from activation_fn import ActivationFunction, ReLU
 
 fn weightAndBias[layout_input: Layout,
@@ -241,12 +241,17 @@ fn naiveAttention[layout0: Layout,
         for j in range(K.shape[1]()):
             KT[j, i] = K[i, j]
     """
-    KT.copy_from(K)
+    #KT.copy_from(K)
+    _myTensorCopyFrom(src = K, dest = KT)
     
     #dotProductTiledVectorizedParallelized(Q, KT, scores)
     naiveDotProduct(Q, KT, scores)
-    scores = scores / sqrt(d_k)
-    scores_probs.copy_from(scores)
+    #scores = scores / sqrt(d_k) # TODO: big sizes break compilation bug
+    for i in range(scores.shape[0]()):
+        for j in range(scores.shape[1]()):
+            scores[i, j] /= sqrt(d_k)
+    #scores_probs.copy_from(scores)
+    _myTensorCopyFrom(src = scores, dest = scores_probs)
     # modifies scores_probs in-place
     naiveSoftmax(scores_probs)
 

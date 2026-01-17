@@ -11,6 +11,17 @@ from attention import ftype, LLM, TransformerBlock, ModelParams
 from tokenizer import ASCIITokenizer
 from cliparser import TokenizerParser
 
+fn prettyPrintBytes(bytes: Int) -> String:
+    var fbytes = Float64(bytes)
+    if fbytes < 1024:
+        return "{}B".format(bytes)
+    elif fbytes < 1024 * 1024:
+        return "{}KB".format(round(fbytes / 1024, 4))
+    elif fbytes < 1024 * 1024 * 1024:
+        return "{}MB".format(round(fbytes / (1024 * 1024), 4))
+    else:
+        return "{}GB".format(round(fbytes / (1024 * 1024 * 1024), 4))
+
 fn printIntSpan[o: Origin](tokens: Span[Int, o]):
     var num_to_print = min(len(tokens), 100)
     for i in range(num_to_print):
@@ -54,7 +65,8 @@ fn main() raises:
             var input_tokens = tokenizer.encode(text)
             var test_input = splitInput(input_tokens)
             #printIntSpan(test_input)
-            print("LLM Size In Bytes()", LLM.sizeInBytes())
+            print(ModelParams.__str__())
+            print("LLM Size In Bytes()", prettyPrintBytes(LLM.sizeInBytes()))
             var llm = LLM()
             comptime times = 1
             var start = perf_counter_ns()
@@ -67,6 +79,7 @@ fn main() raises:
                     print("predicted token:", coloredString(tokenizer.decodeToken(predicted_token)))
             var end = perf_counter_ns()
             print("time", (end - start) // 1_000 , "us for", times, "runs")
+            #print("Capacity {} offset {}".format(llm.arena.capacity, llm.arena.offset))
 
     except e:
         print(e, file = stderr)
