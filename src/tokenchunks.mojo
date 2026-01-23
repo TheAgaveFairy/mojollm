@@ -1,8 +1,9 @@
 from iter import Iterator, Iterable
 from testing import TestSuite, assert_equal
 
+
 @fieldwise_init
-struct TokenChunks(Iterable, Copyable):
+struct TokenChunks(Copyable, Iterable):
     """
     Instead of having a sane List[List[Int]], we're going to allocate flattened
     memory and mark the boundaries between each trainable chunk by using another
@@ -14,7 +15,10 @@ struct TokenChunks(Iterable, Copyable):
     tokens:[1,2,3,4,5,6]
     bounds: [0,3,4] # last chunk goes until the end
     """
-    comptime IteratorType[iterable_mut: Bool, //, iterable_origin: Origin[mut=iterable_mut]]: Iterator = ChunkIterator
+
+    comptime IteratorType[
+        iterable_mut: Bool, //, iterable_origin: Origin[mut=iterable_mut]
+    ]: Iterator = ChunkIterator
     comptime Element = Int
     var tokens: List[Int]
     var boundaries: List[Int]
@@ -27,12 +31,18 @@ struct TokenChunks(Iterable, Copyable):
         self.boundaries = type_of(self.boundaries)()
 
     fn __init__(out self, tokens_capacity: Int):
-        self.tokens = type_of(self.tokens)(capacity = tokens_capacity) # oversized
+        self.tokens = type_of(self.tokens)(
+            capacity=tokens_capacity
+        )  # oversized
         self.boundaries = type_of(self.boundaries)()
 
     fn __init__(out self, tokens_capacity: Int, num_chunks: Int):
-        self.tokens = type_of(self.tokens)(capacity = tokens_capacity) # oversized
-        self.boundaries = type_of(self.boundaries)(capacity = num_chunks) # static
+        self.tokens = type_of(self.tokens)(
+            capacity=tokens_capacity
+        )  # oversized
+        self.boundaries = type_of(self.boundaries)(
+            capacity=num_chunks
+        )  # static
 
     fn addChunk(mut self, chunk: List[Int]):
         """Automatically calculates boundary and extends the tokens list."""
@@ -42,26 +52,30 @@ struct TokenChunks(Iterable, Copyable):
         self.boundaries.append(idx)
 
     fn get(self, chunk_idx: Int) -> Optional[Span[Int, origin_of(self.tokens)]]:
-        """Returns an optional Span of the requested token_ids if the chunk_idx is valid."""
+        """Returns an optional Span of the requested token_ids if the chunk_idx is valid.
+        """
         var num_chunks = len(self.boundaries)
         if chunk_idx >= num_chunks:
             return None
         var start = self.boundaries[chunk_idx]
         if chunk_idx == (num_chunks - 1):
-            return self.tokens[start : ]
+            return self.tokens[start:]
         var end = self.boundaries[chunk_idx + 1]
-        return self.tokens[start : end]
+        return self.tokens[start:end]
 
     fn __iter__(ref self: Self) -> Self.IteratorType[origin_of(self)]:
         return ChunkIterator(self.tokens, self.boundaries)
 
+
 @fieldwise_init
 struct ChunkIterator(Iterator):
-    comptime Element = Span[TokenChunks.Element, ImmutAnyOrigin] # tie to Iterable
-    var tokens: Self.Element#Span[Int, ImmutAnyOrigin]
-    var boundaries: Self.Element#Span[Int, ImmutAnyOrigin]
+    comptime Element = Span[
+        TokenChunks.Element, ImmutAnyOrigin
+    ]  # tie to Iterable
+    var tokens: Self.Element  # Span[Int, ImmutAnyOrigin]
+    var boundaries: Self.Element  # Span[Int, ImmutAnyOrigin]
     var current: Int
-    var num_tokens: Int # remember, last chunk doesn't have a clear "end" marker
+    var num_tokens: Int  # remember, last chunk doesn't have a clear "end" marker
 
     fn __init__(out self, tokens: Self.Element, boundaries: Self.Element):
         self.tokens = tokens
@@ -72,17 +86,18 @@ struct ChunkIterator(Iterator):
     fn __next__(mut self) raises StopIteration -> Self.Element:
         if self.current >= self.num_tokens:
             raise StopIteration()
-        
+
         var start = self.boundaries[self.current]
         # REMEMBER! There is no token telling us when the end is (idx == len(boundaries))
         if self.current == (self.num_tokens - 1):
             self.current += 1
-            return self.tokens[start : ]
+            return self.tokens[start:]
 
         # else
         var end = self.boundaries[self.current + 1]
         self.current += 1
-        return self.tokens[start : end]
+        return self.tokens[start:end]
+
 
 def main():
     print("Tests passed?", tests())
@@ -91,24 +106,26 @@ def main():
     suite.test[testGetChunk]()
     suite^.run()
 
+
 def testAddChunk():
-    var tokens = [1,2,3,4,5,6]
-    var boundaries = [0,3,4]
+    var tokens = [1, 2, 3, 4, 5, 6]
+    var boundaries = [0, 3, 4]
     var my_iterable = TokenChunks(tokens^, boundaries^)
-    my_iterable.addChunk([7,8,9])
+    my_iterable.addChunk([7, 8, 9])
     my_iterable.addChunk([10])
     var add_chunk_result = ""
     for chunk in my_iterable:
         for c in chunk:
             add_chunk_result += "{},".format(c)
-        add_chunk_result += '|'
+        add_chunk_result += "|"
 
-    #print(add_chunk_result)
+    # print(add_chunk_result)
     assert_equal(add_chunk_result, "1,2,3,|4,|5,6,|7,8,9,|10,|")
 
+
 def testGetChunk():
-    var tokens = [1,2,3,4,5,6]
-    var boundaries = [0,3,4]
+    var tokens = [1, 2, 3, 4, 5, 6]
+    var boundaries = [0, 3, 4]
     var my_iterable = TokenChunks(tokens^, boundaries^)
 
     var get_result = ""
@@ -117,6 +134,5 @@ def testGetChunk():
         var iterable = chunk_zero.value()
         for c in iterable:
             get_result += "{},".format(c)
-        get_result += '|'
+        get_result += "|"
     assert_equal(get_result, "1,2,3,|")
-

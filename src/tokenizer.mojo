@@ -18,7 +18,8 @@ from hashlib.hasher import Hasher, default_hasher
 from utils.lock import BlockingSpinLock
 from os.atomic import Atomic
 from collections import Set
-#from python import Python # for RegExp engines
+
+# from python import Python # for RegExp engines
 
 from helpers import (
     showProgress,
@@ -30,9 +31,17 @@ from attention import ftype, sftype, nelts
 from cliparser import TokenizerParser
 from tokenchunks import TokenChunks
 
+
 @register_passable("trivial")
 @fieldwise_init
-struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCopyable, Representable):
+struct Pair(
+    Copyable,
+    Equatable,
+    Hashable,
+    ImplicitlyCopyable,
+    ImplicitlyDestructible,
+    Representable,
+):
     """
     Stores a hashable pair of Ints. There's probably another way to do this,
     but the motivation is that our vocab size (indexes) will probably be small
@@ -49,9 +58,10 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     This will easily fit in an int32, meaning an Int64 can always fit everything we could ever need. Note, we can ignore the "sign" bit, it doesn't affect anything for simple
     hashing.
     """
-    #comptime __copyinit__is_trivial = True  # possibly redundant w/ @register_passable
+
+    # comptime __copyinit__is_trivial = True  # possibly redundant w/ @register_passable
     comptime DUMMY = Self(-1, -1)
-    comptime delimeter = '|'
+    comptime delimeter = "|"
 
     # data must be BIGGER than a Byte to allow for expansion
     var a: Int
@@ -60,10 +70,10 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     @staticmethod
     @always_inline("nodebug")
     fn fromRepr(repr: StringSlice) raises -> Self:
-        """ Not the safest but should be fine."""
-        #var had_space: Int = 1 if repr[0] == ' ' else 0
+        """Not the safest but should be fine."""
+        # var had_space: Int = 1 if repr[0] == ' ' else 0
         var had_space = 0
-        var stripped_repr = repr[1 + had_space :-1] # remove ()
+        var stripped_repr = repr[1 + had_space : -1]  # remove ()
         var pair_strs = stripped_repr.split(Self.delimeter)
         try:
             var a = Int(pair_strs[0])
@@ -82,14 +92,15 @@ struct Pair(Hashable, Copyable, ImplicitlyDestructible, Equatable, ImplicitlyCop
     fn __repr__(self) -> String:
         return "(" + String(self.a) + Self.delimeter + String(self.b) + ")"
 
+
 struct ASCIITokenizer(Copyable, Movable):
-    var vocab_encode: List[Pair] # "id" is "idx + 256"
+    var vocab_encode: List[Pair]  # "id" is "idx + 256"
     var vocab_size: Int
     var special_tokens: List[String]
 
     fn __init__(out self, desired_vocab_size: Int):
         var safe_desired_vocab_size = max(desired_vocab_size, 256)
-        self.vocab_size = safe_desired_vocab_size # we'll BPE up to this number
+        self.vocab_size = safe_desired_vocab_size  # we'll BPE up to this number
         self.vocab_encode = type_of(self.vocab_encode)()
         self.special_tokens = type_of(self.special_tokens)()
 
@@ -100,27 +111,29 @@ struct ASCIITokenizer(Copyable, Movable):
         See below comment for Pattern approximation (raw strings not supported yet).
         Claude 4.5 Sonnet refined my skeleton attempt. Verbose, but looks good.
         """
-        #Pattern approximation: r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+".
+        # Pattern approximation: r"'(?i:[sdmt]|ll|ve|re)|\w+|[^\w\s]+|\s+".
         # TODO: add word beginning token ('220') and attach spaces to beginnings
-        
+
         var n = len(raw_ids)
-        var chunks = TokenChunks(n) #conceptually a List[List[Int]]()
+        var chunks = TokenChunks(n)  # conceptually a List[List[Int]]()
         var i = 0
-        
+
         while i < n:
             var id = raw_ids[i]
-            
+
             # Check for apostrophe contractions first
             if id == ord("'"):
                 # Check for 'll, 've, 're (2 chars after ')
                 if i + 2 < n:
                     var next_two = (raw_ids[i + 1], raw_ids[i + 2])
-                    if next_two == (ord('l'), ord('l')) or \
-                       next_two == (ord('L'), ord('L')) or \
-                       next_two == (ord('v'), ord('e')) or \
-                       next_two == (ord('V'), ord('E')) or \
-                       next_two == (ord('r'), ord('e')) or \
-                       next_two == (ord('R'), ord('E')):
+                    if (
+                        next_two == (ord("l"), ord("l"))
+                        or next_two == (ord("L"), ord("L"))
+                        or next_two == (ord("v"), ord("e"))
+                        or next_two == (ord("V"), ord("E"))
+                        or next_two == (ord("r"), ord("e"))
+                        or next_two == (ord("R"), ord("E"))
+                    ):
                         var chunk = List[Int]()
                         chunk.append(raw_ids[i])
                         chunk.append(raw_ids[i + 1])
@@ -128,69 +141,91 @@ struct ASCIITokenizer(Copyable, Movable):
                         chunks.addChunk(chunk^)
                         i += 3
                         continue
-                
+
                 # Check for 's, 't, 'd, 'm (1 char after ')
                 if i + 1 < n:
                     var next_one = raw_ids[i + 1]
-                    if next_one == ord('s') or next_one == ord('S') or \
-                       next_one == ord('t') or next_one == ord('T') or \
-                       next_one == ord('d') or next_one == ord('D') or \
-                       next_one == ord('m') or next_one == ord('M'):
+                    if (
+                        next_one == ord("s")
+                        or next_one == ord("S")
+                        or next_one == ord("t")
+                        or next_one == ord("T")
+                        or next_one == ord("d")
+                        or next_one == ord("D")
+                        or next_one == ord("m")
+                        or next_one == ord("M")
+                    ):
                         var chunk = List[Int]()
                         chunk.append(raw_ids[i])
                         chunk.append(raw_ids[i + 1])
                         chunks.addChunk(chunk^)
                         i += 2
                         continue
-                
+
                 # Just a lone apostrophe - treat as punctuation
                 var chunk = List[Int]()
                 chunk.append(id)
                 chunks.addChunk(chunk^)
                 i += 1
-            
+
             # Whitespace - separate chunk
-            elif id == ord(' ') or id == ord('\n') or id == ord('\t') or id == ord('\r'):
+            elif (
+                id == ord(" ")
+                or id == ord("\n")
+                or id == ord("\t")
+                or id == ord("\r")
+            ):
                 var chunk = List[Int]()
                 chunk.append(id)
                 chunks.addChunk(chunk^)
                 i += 1
-            
+
             # Alphanumeric - collect into word
-            elif (id >= ord('a') and id <= ord('z')) or \
-                 (id >= ord('A') and id <= ord('Z')) or \
-                 (id >= ord('0') and id <= ord('9')):
+            elif (
+                (id >= ord("a") and id <= ord("z"))
+                or (id >= ord("A") and id <= ord("Z"))
+                or (id >= ord("0") and id <= ord("9"))
+            ):
                 var chunk = List[Int]()
                 while i < n:
                     var c = raw_ids[i]
-                    if (c >= ord('a') and c <= ord('z')) or \
-                       (c >= ord('A') and c <= ord('Z')) or \
-                       (c >= ord('0') and c <= ord('9')):
+                    if (
+                        (c >= ord("a") and c <= ord("z"))
+                        or (c >= ord("A") and c <= ord("Z"))
+                        or (c >= ord("0") and c <= ord("9"))
+                    ):
                         chunk.append(c)
                         i += 1
                     else:
                         break
-                #chunks.addChunk(chunk^) # removed so we can check for "n't"
-            
+                # chunks.addChunk(chunk^) # removed so we can check for "n't"
+
                 # Check if word ends with 'n' and is followed by "'t"
                 if len(chunk) > 0 and i + 2 <= n:
                     var last_char = chunk[len(chunk) - 1]
-                    if (last_char == ord('n') or last_char == ord('N')) and \
-                       i + 1 < n and raw_ids[i] == ord("'") and \
-                       i + 1 < n and (raw_ids[i + 1] == ord('t') or raw_ids[i + 1] == ord('T')):
+                    if (
+                        (last_char == ord("n") or last_char == ord("N"))
+                        and i + 1 < n
+                        and raw_ids[i] == ord("'")
+                        and i + 1 < n
+                        and (
+                            raw_ids[i + 1] == ord("t")
+                            or raw_ids[i + 1] == ord("T")
+                        )
+                    ):
                         # Remove 'n' from word chunk
                         _ = chunk.pop()
                         chunks.addChunk(chunk^)
-                        
+
                         # Create "n't" chunk
                         var contraction = List[Int]()
                         contraction.append(last_char)  # n
-                        contraction.append(raw_ids[i])   # '
-                        contraction.append(raw_ids[i + 1]) # t
+                        contraction.append(raw_ids[i])  # '
+                        contraction.append(raw_ids[i + 1])  # t
                         chunks.addChunk(contraction^)
                         i += 2
                         continue
-                
+
                 chunks.addChunk(chunk^)
 
             # Punctuation - separate chunk
@@ -199,12 +234,14 @@ struct ASCIITokenizer(Copyable, Movable):
                 chunk.append(id)
                 chunks.addChunk(chunk^)
                 i += 1
-        
-        #for chunk in chunks[:100]:
+
+        # for chunk in chunks[:100]:
         #    print(chunk)
         return chunks^
 
-    fn trainWithProtections(mut self, text: StringSlice, debug_display: Bool = False):
+    fn trainWithProtections(
+        mut self, text: StringSlice, debug_display: Bool = False
+    ):
         """
         Byte Pair Encoding. Text is assumed to be ASCII. Implements "regexp".
         """
@@ -219,10 +256,12 @@ struct ASCIITokenizer(Copyable, Movable):
                 showProgress(i, num_merges)
 
             var most_common_pair_count = 0
-            var most_common_pair = Pair.DUMMY # dummy values
+            var most_common_pair = Pair.DUMMY  # dummy values
 
             var s = 256 + i
-            var pair_counts = self._countPairsChunks(ids, s) # returns an 's' x 's' "matrix"
+            var pair_counts = self._countPairsChunks(
+                ids, s
+            )  # returns an 's' x 's' "matrix"
             for j, count in enumerate(pair_counts):
                 var a = j // s
                 var b = j % s
@@ -234,7 +273,7 @@ struct ASCIITokenizer(Copyable, Movable):
 
             self.vocab_encode.append(most_common_pair)
             ids = self._mergeChunks(ids, most_common_pair, s)
-            
+
         if debug_display:
             print()
 
@@ -243,28 +282,29 @@ struct ASCIITokenizer(Copyable, Movable):
         var ids = Self.stringToTokenList(text)
         for i, pair in enumerate(self.vocab_encode):
             var token_id = i + 256
-            ids = self._merge(ids, pair, token_id) 
+            ids = self._merge(ids, pair, token_id)
 
         return ids^
-            
+
     fn decode(self, tokens: List[Int]) raises -> String:
         """Decodes a list of token ids into the original text."""
         var unmerged = tokens.copy()
-        for i in range(len(self.vocab_encode) - 1, -1, -1): # LIFO
+        for i in range(len(self.vocab_encode) - 1, -1, -1):  # LIFO
             var pair = self.vocab_encode[i]
             var token_id = 256 + i
             unmerged = self._unmerge(unmerged, pair, token_id)
 
-        var bytes = List[Byte](capacity = len(unmerged))
+        var bytes = List[Byte](capacity=len(unmerged))
         for n in unmerged:
             if n > 255:
                 raise Error("Tokenizer error!", n, "> 255")
             bytes.append(Byte(n))
 
-        return String(unsafe_from_utf8 = bytes)
-    
+        return String(unsafe_from_utf8=bytes)
+
     fn exportVocab(self, filename: String):
-        """For use with Claude 4.5's tsx visualizer.html (which has bugs but that's ok)."""
+        """For use with Claude 4.5's tsx visualizer.html (which has bugs but that's ok).
+        """
         print("Exporting vocab for visualizer:", filename)
         try:
             with open(filename, "w") as f:
@@ -274,7 +314,7 @@ struct ASCIITokenizer(Copyable, Movable):
                     result += "{}: ({}, {})\n".format(256 + i, pair.a, pair.b)
                 f.write(result)
         except e:
-            print(e, file = stderr)
+            print(e, file=stderr)
 
     fn save(self, filename: String) raises:
         """Saves as a plain text file, for now."""
@@ -293,16 +333,20 @@ struct ASCIITokenizer(Copyable, Movable):
         var self = Self(0)
         try:
             with open(filename, "r") as f:
-                var lines = f.read().split('\n')
-                for i, line in enumerate(lines): 
+                var lines = f.read().split("\n")
+                for i, line in enumerate(lines):
                     if not len(line):
                         _ = lines.pop(i)
                 if len(lines) != 2:
-                    #for line in lines:
+                    # for line in lines:
                     #    print(line[:5], file = stderr)
-                    raise Error(filename, " encoded wrong. Should have two lines. Had:", len(lines))
+                    raise Error(
+                        filename,
+                        " encoded wrong. Should have two lines. Had:",
+                        len(lines),
+                    )
                 # ex. encode line [(123, 456), (13, 37)]
-                var encode_pairs = lines[0][1:-1].split(',')
+                var encode_pairs = lines[0][1:-1].split(",")
                 self.vocab_size = 256 + len(encode_pairs)
 
                 try:
@@ -310,15 +354,17 @@ struct ASCIITokenizer(Copyable, Movable):
                         var pair = Pair.fromRepr(pair_str.strip())
                         self.vocab_encode.append(pair)
                 except e:
-                    print(e, file = stderr)
-                var spec_toks = lines[1][1:-1] # TODO: implement + dont forget vocab size
+                    print(e, file=stderr)
+                var spec_toks = lines[1][
+                    1:-1
+                ]  # TODO: implement + dont forget vocab size
                 _ = spec_toks
-                
+
         except e:
             raise e^
         return self^
 
-    fn decodeToken(self, token_id: Int) -> String: # could return List[Byte]
+    fn decodeToken(self, token_id: Int) -> String:  # could return List[Byte]
         """
         Might be faster than "decode" for a single token.
         """
@@ -341,35 +387,43 @@ struct ASCIITokenizer(Copyable, Movable):
         var result = String(unsafe_from_utf8=[Byte(x) for x in internal])
         return result
 
-    fn _merge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
-            """
-            We take in a read-only list of token ids and allocate new fresh memory.
-            """
-            var n = len(text_tokens)
-            var merged = List[Int](capacity = n)
-
-            var c = pair.a
-            var d = pair.b
-
-            var i = 0
-            while i < n:
-                var a = text_tokens[i]
-                var b = text_tokens[i + 1]
-                if i < n - 1 and (a == c and b == d):
-                    merged.append(token_id)
-                    i += 2
-                else:
-                    merged.append(text_tokens[i])
-                    i += 1
-            
-            return merged^
-    fn _unmerge(self, text_tokens: List[Int], pair: Pair, token_id: Int) -> List[Int]:
-        """Used for decode. Looks for compound tokens and replaces them with parts."""
+    fn _merge(
+        self, text_tokens: List[Int], pair: Pair, token_id: Int
+    ) -> List[Int]:
+        """
+        We take in a read-only list of token ids and allocate new fresh memory.
+        """
         var n = len(text_tokens)
-        comptime extra_capacity_factor = 0.125 # could tune this to avoid reallocing
+        var merged = List[Int](capacity=n)
+
+        var c = pair.a
+        var d = pair.b
+
+        var i = 0
+        while i < n:
+            var a = text_tokens[i]
+            var b = text_tokens[i + 1]
+            if i < n - 1 and (a == c and b == d):
+                merged.append(token_id)
+                i += 2
+            else:
+                merged.append(text_tokens[i])
+                i += 1
+
+        return merged^
+
+    fn _unmerge(
+        self, text_tokens: List[Int], pair: Pair, token_id: Int
+    ) -> List[Int]:
+        """Used for decode. Looks for compound tokens and replaces them with parts.
+        """
+        var n = len(text_tokens)
+        comptime extra_capacity_factor = 0.125  # could tune this to avoid reallocing
         var bonus = Int(n * extra_capacity_factor)
-        var unmerged = List[Int](capacity = n + bonus) # might be BIGGER than this at end
-        
+        var unmerged = List[Int](
+            capacity=n + bonus
+        )  # might be BIGGER than this at end
+
         for _, token in enumerate(text_tokens):
             if token != token_id:
                 unmerged.append(token)
@@ -385,16 +439,21 @@ struct ASCIITokenizer(Copyable, Movable):
         """Splits into bytes as Ints. UTF-8 or ASCII doesn't really matter."""
         var bytes = text.as_bytes()
         var n = len(bytes)
-        var ids = List[Int](capacity = n)
+        var ids = List[Int](capacity=n)
         for b in bytes:
             ids.append(Int(b))
         return ids^
 
-    fn _mergeChunks(self, read chunks: TokenChunks, pair: Pair, new_token_id: Int) -> TokenChunks:
-        """  We take in a read-only list of token ids and allocate new fresh memory."""
+    fn _mergeChunks(
+        self, read chunks: TokenChunks, pair: Pair, new_token_id: Int
+    ) -> TokenChunks:
+        """We take in a read-only list of token ids and allocate new fresh memory.
+        """
         var tokens_capacity = len(chunks.tokens)
         var num_chunks = len(chunks.boundaries)
-        var merged = TokenChunks(tokens_capacity, num_chunks) # capacity won't get filled, that's ok!
+        var merged = TokenChunks(
+            tokens_capacity, num_chunks
+        )  # capacity won't get filled, that's ok!
 
         var c = pair.a
         var d = pair.b
@@ -415,7 +474,7 @@ struct ASCIITokenizer(Copyable, Movable):
             if i < m:
                 temp.append(chunk[i])
             merged.addChunk(temp^)
-        
+
         return merged^
 
     fn _countPairsChunks(self, chunks: TokenChunks, s: Int) -> List[Int]:
@@ -424,7 +483,7 @@ struct ASCIITokenizer(Copyable, Movable):
         We could probably save a lot of memory by using [U]Int16, need be on a
         giant training dataset.
         """
-        var counts = List[Int](length = s * s, fill = 0) # UInt16
+        var counts = List[Int](length=s * s, fill=0)  # UInt16
         for chunk in chunks:
             for i in range(len(chunk) - 1):
                 var a = chunk[i]
@@ -433,7 +492,7 @@ struct ASCIITokenizer(Copyable, Movable):
         return counts^
 
     fn __copyinit__(out self, other: Self):
-        self.vocab_size = other.vocab_size # we'll BPE up to this number
+        self.vocab_size = other.vocab_size  # we'll BPE up to this number
         self.vocab_encode = other.vocab_encode.copy()
         self.special_tokens = other.special_tokens.copy()
 
@@ -443,24 +502,27 @@ struct ASCIITokenizer(Copyable, Movable):
         var st = self.special_tokens == other.special_tokens
         return vs and pc and st
 
+
 fn main():
     # tests
     var config = TokenizerParser()
-    
+
     try:
         with open(config.input_filename, "r") as f:
             var text = f.read()
 
-            var tokenizer = ASCIITokenizer(config.vocab_size) # ~280 is enough to display recursion
+            var tokenizer = ASCIITokenizer(
+                config.vocab_size
+            )  # ~280 is enough to display recursion
             tokenizer.trainWithProtections(text, True)
-            #print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
-            #print(showExample(tokenizer, tokenizer.encode(text[:500])))
+            # print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
+            # print(showExample(tokenizer, tokenizer.encode(text[:500])))
             tokenizer.save(config.save_name)
 
             var vocab_filename = "models/vocab_{}.txt".format(config.vocab_size)
             tokenizer.exportVocab(vocab_filename)
 
-            #var ratio = compareTrainingTimesTest(text, vocab_size = 1000, runs = 5)
+            # var ratio = compareTrainingTimesTest(text, vocab_size = 1000, runs = 5)
             _ = """
             var tok2 = ASCIITokenizer.load("bpe_25000.tok")
             var test_ids = tok2.encode(text[:200])
@@ -473,6 +535,7 @@ fn main():
     except e:
         print(e)
 
+
 fn saveLoadTest(tokenizer: ASCIITokenizer) -> Bool:
     var filename = "bpe_{}.tok".format(tokenizer.vocab_size)
     try:
@@ -480,15 +543,17 @@ fn saveLoadTest(tokenizer: ASCIITokenizer) -> Bool:
         var tok2 = ASCIITokenizer.load(filename)
         return tokenizer == tok2
     except e:
-        print(e, file = stderr)
+        print(e, file=stderr)
         return False
+
 
 fn decodeEncodeTest(tokenizer: ASCIITokenizer, text: StringSlice) -> Bool:
     try:
         return text == tokenizer.decode(tokenizer.encode(text))
     except e:
-        print(e, file = stderr)
+        print(e, file=stderr)
         return False
+
 
 fn compareVocabsTest(a: ASCIITokenizer, b: ASCIITokenizer) -> Bool:
     """
@@ -497,41 +562,50 @@ fn compareVocabsTest(a: ASCIITokenizer, b: ASCIITokenizer) -> Bool:
     Could also 'return round(seen / n, 4) * 100'.
     """
     var verify = Set[Pair](a.vocab_encode)
-    var n = len(a.vocab_encode) # vocab_size - 256
+    var n = len(a.vocab_encode)  # vocab_size - 256
     var seen = 0
     for i in range(n):
         if b.vocab_encode[i] in verify:
             seen += 1
-    
+
     return seen == n
 
+
 @deprecated("No other training methods implemented any longer.")
-fn compareTrainingTimesTest(text: StringSlice, vocab_size: Int = 500, runs: Int = 5) -> Float64:
+fn compareTrainingTimesTest(
+    text: StringSlice, vocab_size: Int = 500, runs: Int = 5
+) -> Float64:
     var tok_a = ASCIITokenizer(vocab_size)
     var tok_b = ASCIITokenizer(vocab_size)
-    
+
     var accum = 0.0
     for r in range(runs):
         var start = perf_counter_ns()
-        #tok_a.train(text)
+        # tok_a.train(text)
         var mid = perf_counter_ns()
-        #tok_b.trainParallelized(text, num_logical_cores())
+        # tok_b.trainParallelized(text, num_logical_cores())
         tok_b.trainWithProtections(text)
         var end = perf_counter_ns()
-        
+
         var single_ms = (mid - start) // 1_000_000
         var multi_ms = (end - mid) // 1_000_000
         var ratio = multi_ms / single_ms
         accum += ratio
-        print(compareVocabsTest(tok_a, tok_b), ", single is", ratio, "times faster.")
+        print(
+            compareVocabsTest(tok_a, tok_b),
+            ", single is",
+            ratio,
+            "times faster.",
+        )
     return accum / runs
+
 
 fn showExample(tokenizer: ASCIITokenizer, encoded: List[Int]) -> String:
     var result = ""
     comptime max_len = 250
     for tok in encoded[:max_len]:
         var temp = tokenizer.decodeToken(tok)
-        #if temp[-1] == "\n":
+        # if temp[-1] == "\n":
         #    temp = String(temp[:-1]) + "\\n"
         result += String(tok) + "\t||" + temp + "\n"
     return result^

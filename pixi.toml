@@ -6,6 +6,7 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
+#buildmain = { cmd = "mojo build -Xlinker -lm main.mojo", cwd = "src" }
 
 [dependencies]
 mojo = ">=0.26.1.0.dev2025123005,<0.27"

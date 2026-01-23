@@ -7,9 +7,9 @@ from sys.info import (
     simd_width_of,
     num_logical_cores,
     size_of,
-    align_of
+    align_of,
 )
-from sys import stderr, is_big_endian
+from sys import stderr, is_big_endian, is_defined
 from utils.index import IndexList
 import os
 from memory import memcpy, memset, memset_zero
@@ -39,6 +39,7 @@ from ops import (
     layerNorm,
     feedForward,
     naiveAttention,
+    applyCausalMask,
 )
 from arena import BumpArenaAllocator
 
@@ -48,47 +49,69 @@ comptime nelts = simd_width_of[ftype]()
 
 # token IDs stored as:
 comptime token_itype = DType.uint16
-comptime display = False#os.getenv("DEBUG", "False") == "True"
+# comptime display = False#os.getenv("DEBUG", "False") == "True"
+comptime display = True if is_defined["DISPLAY"]() else False
 
-fn _myTensorCopyFrom[layout_a: Layout, layout_b: Layout, d_type: DType](*, src: LayoutTensor[d_type, layout_a, MutAnyOrigin], dest: LayoutTensor[d_type, layout_b, MutAnyOrigin]):
+
+fn _myTensorCopyFrom[
+    layout_a: Layout, layout_b: Layout, d_type: DType
+](
+    *,
+    src: LayoutTensor[d_type, layout_a, MutAnyOrigin],
+    dest: LayoutTensor[d_type, layout_b, MutAnyOrigin],
+):
     """Automagically handles transposition."""
-    constrained[layout_a.rank() == layout_b.rank(), "Invalid tensor ranks at _myTensorCopyFrom"]()
+    constrained[
+        layout_a.rank() == layout_b.rank(),
+        "Invalid tensor ranks at _myTensorCopyFrom",
+    ]()
     comptime m = src.shape[0]()
     comptime n = src.shape[1]()
     comptime mm = dest.shape[0]()
     comptime nn = dest.shape[1]()
     comptime equal = m == mm and n == nn
     comptime transposed = m == nn and n == mm
-    comptime valid = equal or transposed and layout_a.size() == layout_b.size() # just to be safe
+    comptime valid = equal or transposed and layout_a.size() == layout_b.size()  # just to be safe
     constrained[valid, "Invalid tensor shapes at _myTensorCopyFrom"]()
+
     @parameter
     if equal:
         memcpy(dest=dest.ptr, src=src.ptr, count=layout_a.size())
-    else: # Transposed!
+    else:  # Transposed!
         # DO NOT PARAMETERIZE THE FOR LOOPS!
         for i in range(m):
             for j in range(n):
                 dest[j, i] = src[i, j]
 
-fn _arenaTensorHelper[layout: Layout, d_type: DType](mut arena: BumpArenaAllocator, *, random: Bool = False, std: Float64 = 0.02) -> LayoutTensor[d_type, layout, MutAnyOrigin]:
+
+fn _arenaTensorHelper[
+    layout: Layout, d_type: DType
+](
+    mut arena: BumpArenaAllocator, *, random: Bool = False, std: Float64 = 0.02
+) -> LayoutTensor[d_type, layout, MutAnyOrigin]:
     var offset_before = arena.offset
     var ptr = arena.alloc[Scalar[d_type]](layout.size())
     var offset_after = arena.offset
     var expected = layout.size() * size_of[Scalar[d_type]]()
     var actual = offset_after - offset_before
     if expected != actual:
-        os.abort("Allocation failure! Expected: {} != Actual: {}".format(expected, actual))
-    #print("_arenaTensorHelper {}B @{}".format(expected, ptr))
+        os.abort(
+            "Allocation failure! Expected: {} != Actual: {}".format(
+                expected, actual
+            )
+        )
+    # print("_arenaTensorHelper {}B @{}".format(expected, ptr))
     var tensor = LayoutTensor[d_type, layout, MutAnyOrigin](ptr)
     if random:
         randn(ptr, layout.size(), 0, std)
-    #else: # we'll just zero the arena to start with instead
+    # else: # we'll just zero the arena to start with instead
     #    _ = tensor.fill(0)
     return tensor
 
-struct ModelParams():
+
+struct ModelParams:
     comptime num_transformer_blocks = 1 << 4
-    comptime vocab_size = 1 << 10
+    comptime vocab_size = 1 << 13
 
     comptime max_batch_size = 1 << 4  # hmm
     comptime seq_len = 1 << 5
@@ -118,12 +141,14 @@ ModelParams:
             ModelParams.vocab_size,
             ModelParams.max_batch_size,
             ModelParams.seq_len,
-            ModelParams.d_model)
+            ModelParams.d_model,
+        )
         return result
-        
 
-trait Weights():
+
+trait Weights:
     """Defaultable removed b/c arena."""
+
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
 
@@ -144,7 +169,7 @@ trait Weights():
 
 
 struct EmbeddingWeights(Copyable, Weights):
-    #var arena: BumpArenaAllocator
+    # var arena: BumpArenaAllocator
 
     comptime token_embeddings_layout = Layout.row_major(
         ModelParams.vocab_size, ModelParams.d_model
@@ -166,11 +191,13 @@ struct EmbeddingWeights(Copyable, Weights):
         ftype, Self.position_embeddings_layout, MutAnyOrigin
     ]
 
-
     @always_inline("nodebug")
     fn embedTokens(
         self,
-        token_ids: List[Int],
+        # token_ids: List[Int],
+        token_ids: InlineArray[
+            Int, ModelParams.seq_len
+        ],  # TODO: should this be InlineArray[Int, seq_len]
         mut X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
     ):
         """
@@ -192,14 +219,22 @@ struct EmbeddingWeights(Copyable, Weights):
             # TODO: __add__ explodes compile time bug (_elementwise_binary_with_broadcast)
             for i in range(ModelParams.d_model):
                 output_slice[i] += tok_emb[i] + pos_emb[i]
-            #output_slice += tok_emb
-            #output_slice += pos_emb
+            # output_slice += tok_emb
+            # output_slice += pos_emb
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        self.token_embeddings = _arenaTensorHelper[Self.token_embeddings_layout, ftype](arena)
-        self.position_embeddings = _arenaTensorHelper[Self.position_embeddings_layout, ftype](arena)
-        self.token_embeddings_grad = _arenaTensorHelper[Self.token_embeddings_layout, ftype](arena)
-        self.position_embeddings_grad = _arenaTensorHelper[Self.position_embeddings_layout, ftype](arena)
+        self.token_embeddings = _arenaTensorHelper[
+            Self.token_embeddings_layout, ftype
+        ](arena)
+        self.position_embeddings = _arenaTensorHelper[
+            Self.position_embeddings_layout, ftype
+        ](arena)
+        self.token_embeddings_grad = _arenaTensorHelper[
+            Self.token_embeddings_layout, ftype
+        ](arena)
+        self.position_embeddings_grad = _arenaTensorHelper[
+            Self.position_embeddings_layout, ftype
+        ](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -209,14 +244,16 @@ struct EmbeddingWeights(Copyable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.token_embeddings, std)
         fillTensorRand(self.position_embeddings, std)
 
 
 struct AttentionWeights(Copyable, Movable, Weights):
-    #var arena: BumpArenaAllocator
+    # var arena: BumpArenaAllocator
     comptime W_q_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_k)
     comptime W_v_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_v)
     var W_q: LayoutTensor[ftype, Self.W_q_layout, MutAnyOrigin]
@@ -230,7 +267,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
     var b_v: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        #self.arena = arena
+        # self.arena = arena
         # weights
         self.W_q = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
         self.W_k = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -250,19 +287,21 @@ struct AttentionWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.W_q, std)
         fillTensorRand(self.W_k, std)
         fillTensorRand(self.W_v, std)
 
-        #fillTensorRand(self.b_q, std)
-        #fillTensorRand(self.b_k, std)
-        #fillTensorRand(self.b_v, std)
+        # fillTensorRand(self.b_q, std)
+        # fillTensorRand(self.b_k, std)
+        # fillTensorRand(self.b_v, std)
 
 
 struct FFWeights(Copyable, Movable, Weights):
-    #var arena: BumpArenaAllocator
+    # var arena: BumpArenaAllocator
 
     comptime w0_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_ff)
     comptime w1_layout = Layout.row_major(ModelParams.d_ff, ModelParams.d_model)
@@ -275,7 +314,7 @@ struct FFWeights(Copyable, Movable, Weights):
     var b1: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        #self.arena = arena
+        # self.arena = arena
 
         self.w0 = _arenaTensorHelper[Self.w0_layout, ftype](arena)
         self.b0 = _arenaTensorHelper[Self.b0_layout, ftype](arena)
@@ -290,26 +329,27 @@ struct FFWeights(Copyable, Movable, Weights):
         result_in_sftype += Self.w1_layout.size()
         result_in_sftype += Self.b1_layout.size()
         return result_in_sftype * size_of[sftype]()
-        
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.w0, std)
-        #fillTensorRand(self.b0, std)
+        # fillTensorRand(self.b0, std)
         fillTensorRand(self.w1, std)
-        #fillTensorRand(self.b1, std)
+        # fillTensorRand(self.b1, std)
 
 
 struct LayerNormWeights(Copyable, Movable, Weights):
-    #var arena: BumpArenaAllocator
+    # var arena: BumpArenaAllocator
 
     comptime gamma_layout = Layout.row_major(ModelParams.d_model)
     var gamma: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        #self.arena = arena
+        # self.arena = arena
         self.gamma = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
         self.beta = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
 
@@ -320,13 +360,16 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.1):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.1
+    ):
         self = Self(arena)
         fillTensorRand(self.gamma, std)
-        #fillTensorRand(self.beta, std)
+        # fillTensorRand(self.beta, std)
+
 
 struct OutputWeights(Copyable, Movable, Weights):
-    #var arena: BumpArenaAllocator
+    # var arena: BumpArenaAllocator
 
     comptime W_layout = Layout.row_major(
         ModelParams.d_model, ModelParams.vocab_size
@@ -336,7 +379,7 @@ struct OutputWeights(Copyable, Movable, Weights):
     var b: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        #self.arena = arena
+        # self.arena = arena
         self.W = _arenaTensorHelper[Self.W_layout, ftype](arena)
         self.b = _arenaTensorHelper[Self.b_layout, ftype](arena)
 
@@ -348,19 +391,19 @@ struct OutputWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.W, std)
-        #fillTensorRand(self.b, std)
+        # fillTensorRand(self.b, std)
 
-struct TransformerBlock(
-    Copyable
-):  # decoder, should this take Weights trait?
 
+struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
 
-    #var arena: BumpArenaAllocator
+    # var arena: BumpArenaAllocator
 
     var ln_attn: LayerNormWeights
     var attn_weights: AttentionWeights  # single head, causal masking
@@ -399,7 +442,7 @@ struct TransformerBlock(
     var ffn_out: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        #self.arena = arena
+        # self.arena = arena
 
         self.ln_attn = LayerNormWeights(arena)
         self.attn_weights = AttentionWeights(arena)
@@ -413,12 +456,22 @@ struct TransformerBlock(
         self.K = _arenaTensorHelper[Self.Q_layout, ftype](arena)
         self.V = _arenaTensorHelper[Self.V_layout, ftype](arena)
 
-        self.attn_scores = _arenaTensorHelper[Self.attn_scores_layout, ftype](arena)
-        self.attn_probs = _arenaTensorHelper[Self.attn_scores_layout, ftype](arena)
-        self.attn_out_pre_residual = _arenaTensorHelper[Self.V_layout, ftype](arena)
-        self.attn_out_post_residual = _arenaTensorHelper[Self.V_layout, ftype](arena)
+        self.attn_scores = _arenaTensorHelper[Self.attn_scores_layout, ftype](
+            arena
+        )
+        self.attn_probs = _arenaTensorHelper[Self.attn_scores_layout, ftype](
+            arena
+        )
+        self.attn_out_pre_residual = _arenaTensorHelper[Self.V_layout, ftype](
+            arena
+        )
+        self.attn_out_post_residual = _arenaTensorHelper[Self.V_layout, ftype](
+            arena
+        )
         self.ffn_input = _arenaTensorHelper[Self.V_layout, ftype](arena)
-        self.ffn_hidden = _arenaTensorHelper[Self.ffn_hidden_layout, ftype](arena)
+        self.ffn_hidden = _arenaTensorHelper[Self.ffn_hidden_layout, ftype](
+            arena
+        )
         self.ffn_out = _arenaTensorHelper[Self.X_layout, ftype](arena)
 
     @staticmethod
@@ -430,19 +483,23 @@ struct TransformerBlock(
         result_in_bytes += LayerNormWeights.sizeInBytes()
         result_in_bytes += FFWeights.sizeInBytes()
 
-        result_in_sftype += Self.X_layout.size() * 2 # pre & post ln attn
-        result_in_sftype += Self.Q_layout.size() * 2 # Q, K
-        result_in_sftype += Self.V_layout.size()     # V
+        result_in_sftype += Self.X_layout.size() * 2  # pre & post ln attn
+        result_in_sftype += Self.Q_layout.size() * 2  # Q, K
+        result_in_sftype += Self.V_layout.size()  # V
 
-        result_in_sftype += Self.attn_scores_layout.size() * 2 # scores, probs
-        result_in_sftype += Self.attn_scores_layout.size() * 2 # scores, probs
-        result_in_sftype += Self.V_layout.size() * 3 # pre and post residuals, into ffn
+        result_in_sftype += Self.attn_scores_layout.size() * 2  # scores, probs
+        result_in_sftype += Self.attn_scores_layout.size() * 2  # scores, probs
+        result_in_sftype += (
+            Self.V_layout.size() * 3
+        )  # pre and post residuals, into ffn
         result_in_sftype += Self.ffn_hidden_layout.size()
         result_in_sftype += Self.X_layout.size()
         return result_in_sftype * size_of[sftype]() + result_in_bytes
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         # TODO: could reduce startup time by initing to random directly
         self.ln_attn = LayerNormWeights.initRandom(arena)
@@ -477,9 +534,14 @@ struct TransformerBlock(
             print("begin tb forward")
             print("\tlayerNorm1")
         # layerNorm(input, gamma, beta, output)
-        _myTensorCopyFrom(src = X, dest = self.X_pre_ln_attn)
+        _myTensorCopyFrom(src=X, dest=self.X_pre_ln_attn)
         printTensorSlice(self.X_pre_ln_attn, "X_pre_ln_attn")
-        layerNorm(self.X_pre_ln_attn, self.ln_attn.gamma, self.ln_attn.beta, self.X_post_ln_attn)
+        layerNorm(
+            self.X_pre_ln_attn,
+            self.ln_attn.gamma,
+            self.ln_attn.beta,
+            self.X_post_ln_attn,
+        )
         printTensorSlice(self.X_post_ln_attn, "X_post_ln_attn")
 
         if display:
@@ -503,7 +565,7 @@ struct TransformerBlock(
             self.attn_weights.b_v,
             self.V,
         )
-        
+
         if display:
             print("\tnaive attention")
         # causal masking not implemented YET
@@ -519,7 +581,9 @@ struct TransformerBlock(
         if display:
             print("\tresidual conn #1")
         # residual conn #1
-        _myTensorCopyFrom(src = self.attn_out_pre_residual, dest = self.attn_out_post_residual)
+        _myTensorCopyFrom(
+            src=self.attn_out_pre_residual, dest=self.attn_out_post_residual
+        )
         self.attn_out_post_residual += self.X_pre_ln_attn
 
         if display:
@@ -545,27 +609,32 @@ struct TransformerBlock(
         )
         if display:
             print("final residual")
-        _myTensorCopyFrom(src = self.ffn_out, dest = output)
-        #output += self.attn_out_post_residual
+        _myTensorCopyFrom(src=self.ffn_out, dest=output)
+        # output += self.attn_out_post_residual
         for i in range(output.shape[0]()):
             for j in range(output.shape[1]()):
                 output[i, j] += self.attn_out_post_residual[i, j]
 
-fn printTensorSlice[layout: Layout](tensor: LayoutTensor[ftype, layout, MutAnyOrigin], name: String,  display: Bool = False):
+
+fn printTensorSlice[
+    layout: Layout
+](tensor: LayoutTensor[ftype, layout, MutAnyOrigin], name: String):
     if not display:
         return
     print("Tensor", name, ":\n")
     comptime tile = 4
-    var tslice = tensor.slice[Slice(0, tile), Slice(0, tile), IndexList[2](0,1)](IndexList[1](0))
+    var tslice = tensor.slice[
+        Slice(0, tile), Slice(0, tile), IndexList[2](0, 1)
+    ](IndexList[1](0))
     print(tslice, "\n")
 
-    
+
 struct LLM:
     var arena: BumpArenaAllocator
     # store token ids so we can update token embeddings
     var input_token_ids: LayoutTensor[
         token_itype, Layout.row_major(ModelParams.seq_len), MutAnyOrigin
-    ] # could be an InlineArray etc
+    ]  # could be an InlineArray etc
     # to take tokens and create a valid input:
     var embedding_weights: EmbeddingWeights
     var embedded_X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
@@ -585,17 +654,26 @@ struct LLM:
     fn __init__(out self):  # allocate buffers and pre-fill / load etc.
         var arena_size_in_bytes = Self.sizeInBytes()
         self.arena = BumpArenaAllocator(arena_size_in_bytes)
-        self.arena.clear() # memset_zeros the whole thing
+        self.arena.clear()  # memset_zeros the whole thing
 
-        self.input_token_ids = _arenaTensorHelper[Layout.row_major(ModelParams.seq_len), token_itype](self.arena)
-        self.embedded_X = _arenaTensorHelper[TransformerBlock.X_layout, ftype](self.arena)
+        self.input_token_ids = _arenaTensorHelper[
+            Layout.row_major(ModelParams.seq_len), token_itype
+        ](self.arena)
+        self.embedded_X = _arenaTensorHelper[TransformerBlock.X_layout, ftype](
+            self.arena
+        )
         self.embedding_weights = EmbeddingWeights.initRandom(self.arena)
 
         # this will create a single temp TransformerBlock, copy it to each location, then delete the temp
-        self.blocks = type_of(self.blocks)(length = ModelParams.num_transformer_blocks, fill = TransformerBlock.initRandom(self.arena))
+        self.blocks = type_of(self.blocks)(
+            length=ModelParams.num_transformer_blocks,
+            fill=TransformerBlock.initRandom(self.arena),
+        )
         self.ln_final_weights = LayerNormWeights.initRandom(self.arena)
         self.output_weights = OutputWeights.initRandom(self.arena)
-        self.final_ln_output = _arenaTensorHelper[TransformerBlock.X_layout, ftype](self.arena)
+        self.final_ln_output = _arenaTensorHelper[
+            TransformerBlock.X_layout, ftype
+        ](self.arena)
         self.logits = _arenaTensorHelper[Self.output_layout, ftype](self.arena)
 
     @staticmethod
@@ -613,20 +691,26 @@ struct LLM:
         result_in_sftype += TransformerBlock.X_layout.size()
 
         result_in_bytes += EmbeddingWeights.sizeInBytes()
-        result_in_bytes += TransformerBlock.sizeInBytes() * ModelParams.num_transformer_blocks
+        result_in_bytes += (
+            TransformerBlock.sizeInBytes() * ModelParams.num_transformer_blocks
+        )
         result_in_bytes += LayerNormWeights.sizeInBytes()
         result_in_bytes += OutputWeights.sizeInBytes()
 
         result_in_sftype += TransformerBlock.X_layout.size()
         result_in_sftype += Self.output_layout.size()
 
-        return (result_in_sftype * size_of[sftype]()) + \
-                (result_in_itype * size_of[Scalar[token_itype]]()) + \
-                result_in_bytes
+        return (
+            (result_in_sftype * size_of[sftype]())
+            + (result_in_itype * size_of[Scalar[token_itype]]())
+            + result_in_bytes
+        )
 
     fn forward(
         mut self,
-        token_ids: List[Int],  # TODO: should this be InlineArray[Int, seq_len]
+        token_ids: InlineArray[
+            Int, ModelParams.seq_len
+        ],  # TODO: should this be InlineArray[Int, seq_len]
         out output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin],
     ):
         """
@@ -635,8 +719,8 @@ struct LLM:
         print("+" * 100)
         # assert_equal(ModelParams.seq_len, len(tokens))
         self.embedding_weights.embedTokens(token_ids, self.embedded_X)
-        #print("EMBEDDED X:\n", self.embedded_X,"\n\n")
-        printTensorSlice(self.embedded_X, "embedded X", display)
+        # print("EMBEDDED X:\n", self.embedded_X,"\n\n")
+        printTensorSlice(self.embedded_X, "embedded X")
 
         var block_output = self.embedded_X.copy()
         for i in range(len(self.blocks)):
@@ -646,9 +730,11 @@ struct LLM:
                 ftype, TransformerBlock.X_layout, MutAnyOrigin
             ].stack_allocation()
             self.blocks[i].forward(block_output, ffn_out_temp)
-            _myTensorCopyFrom(src = ffn_out_temp, dest = self.blocks[i].ffn_out)
+            _myTensorCopyFrom(src=ffn_out_temp, dest=self.blocks[i].ffn_out)
             block_output = self.blocks[i].ffn_out
-            printTensorSlice(self.blocks[i].ffn_out, "block " + String(i) + " ffn_out", display)
+            printTensorSlice(
+                self.blocks[i].ffn_out, "block " + String(i) + " ffn_out"
+            )
 
         if display:
             print("LLM forward blocks done")
@@ -658,7 +744,7 @@ struct LLM:
             self.ln_final_weights.beta,
             self.final_ln_output,
         )
-        printTensorSlice(self.final_ln_output, "final ln output", display)
+        printTensorSlice(self.final_ln_output, "final ln output")
 
         if display:
             print("Final linear layer...")
@@ -669,8 +755,8 @@ struct LLM:
             self.output_weights.b,
             output,
         )
-        printTensorSlice(output, "final output", display)
-        _myTensorCopyFrom(src = output, dest = self.logits)
+        printTensorSlice(output, "final output")
+        _myTensorCopyFrom(src=output, dest=self.logits)
         # naiveSoftmax(output)
 
     fn getNextTokenGreedy(self) -> Int:
@@ -692,4 +778,4 @@ struct LLM:
 
     fn __del__(deinit self):
         print(coloredString("LLM __del__()", ColorsEnum.COLOR_PURPLE))
-        self.arena.buffer.free()#clear()
+        self.arena.buffer.free()  # clear()
