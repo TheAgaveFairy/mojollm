@@ -13,10 +13,12 @@ import os
 from memory import memcpy, memset, memset_zero
 from time import perf_counter_ns
 from algorithm.functional import vectorize, parallelize
-from kernels.nn.softmax import softmax
+#from kernels.nn.softmax import softmax
+from testing import TestSuite, assert_equal, assert_true
 
 from attention import ftype, sftype, token_itype, nelts, _myTensorCopyFrom
 from activation_fn import ActivationFunction, ReLU
+from helpers import compareBuffers, fillTensorRand
 
 
 fn weightAndBias[
@@ -25,17 +27,17 @@ fn weightAndBias[
     layout_bias: Layout,
     layout_output: Layout,
 ](
-    input: LayoutTensor[ftype, layout_input, MutAnyOrigin],
-    weights: LayoutTensor[ftype, layout_weights, MutAnyOrigin],
-    biases: LayoutTensor[ftype, layout_bias, MutAnyOrigin],
+    input: LayoutTensor[ftype, layout_input],
+    weights: LayoutTensor[ftype, layout_weights],
+    biases: LayoutTensor[ftype, layout_bias],
     output: LayoutTensor[ftype, layout_output, MutAnyOrigin],
 ) -> None:
     """
     Does a dot product and adds a bias to output which is modified in-place.
     """
 
-    # dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
-    naiveDotProduct(input, weights, output)
+    dotProductTiledVectorizedParallelized(input, weights, output) # can swap for any dotProduct
+    #naiveDotProduct(input, weights, output)
 
     # @parameter # explodes compile time
     for i in range(output.shape[0]()):
@@ -47,8 +49,8 @@ fn weightAndBias[
 fn dotProductTiledVectorizedParallelized[
     layout_a: Layout, layout_b: Layout, layout_c: Layout, tile_size: Int = 32
 ](
-    a: LayoutTensor[ftype, layout_a, MutAnyOrigin],
-    b: LayoutTensor[ftype, layout_b, MutAnyOrigin],
+    a: LayoutTensor[ftype, layout_a],
+    b: LayoutTensor[ftype, layout_b],
     c: LayoutTensor[ftype, layout_c, MutAnyOrigin],
 ) -> None:
     """
@@ -58,6 +60,11 @@ fn dotProductTiledVectorizedParallelized[
     comptime M = a.shape[0]()
     comptime L = a.shape[1]()
     comptime N = b.shape[1]()
+
+    comptime tile_small_enough = tile_size <= M and tile_size <= L and tile_size <= N
+    comptime are_powers_of_two = isPowerOfTwo(M) and isPowerOfTwo(L) and isPowerOfTwo(N) and isPowerOfTwo(tile_size)
+    constrained[tile_small_enough, "Tile size too big for matrices of sizes {} {} {}.".format(M, L, N)]()
+    constrained[are_powers_of_two, "Shapes of tiled matmul not powers of two."]()
 
     comptime num_tiles_m = M // tile_size
     comptime num_tiles_n = N // tile_size
@@ -74,7 +81,11 @@ fn dotProductTiledVectorizedParallelized[
 
         for k in range(L // tile_size):
             var a_tile = a.tile[tile_size, tile_size](ci, k)
-            var bT_tile = b.tile[tile_size, tile_size](k, cj).transpose()
+            var b_tile = b.tile[tile_size, tile_size](k, cj).transpose()
+
+            var bT_tile = LayoutTensor[ftype, Layout.row_major(tile_size, tile_size), MutAnyOrigin].stack_allocation()
+            bT_tile.copy_from(b_tile)
+            # TODO:: bT_tile needs to correctly MOVE data
 
             for ti in range(tile_size):
                 for tj in range(tile_size):
@@ -116,18 +127,16 @@ fn naiveDotProduct[
             c[i, j] = temp
 
 
-@deprecated("Not sure this makes sense.")
-fn dotProductSlices[
+fn dotProductVectorized[
     layout_a: Layout, layout_b: Layout, layout_c: Layout
 ](
-    a: LayoutTensor[ftype, layout_a, MutAnyOrigin],
-    b: LayoutTensor[ftype, layout_b, MutAnyOrigin],
+    a: LayoutTensor[ftype, layout_a],
+    b: LayoutTensor[ftype, layout_b],
     c: LayoutTensor[ftype, layout_c, MutAnyOrigin],
 ) -> None:
     """
     Modifies 'c' in-place as output.
-    Vectorized / faster than naive.
-    Use tiled version when available.
+    Vectorized / faster than naive. Use tiled version when available.
     """
 
     comptime rows = a.shape[0]()  # seq_len
@@ -136,25 +145,30 @@ fn dotProductSlices[
 
     # var bT = LayoutTensor[ftype, layout_b.transpose(), MutAnyOrigin].stack_allocation() #b.transpose()
     # bT.copy_from(b)
-    var b_temp = rebind[
-        LayoutTensor[ftype, Layout.row_major(inner, cols), MutAnyOrigin]
-    ](b)
-    var bT = layoutTensorDataTranspose2D[inner, cols](b_temp)
+    #var b_temp = rebind[
+    #    LayoutTensor[ftype, Layout.row_major(inner, cols), MutAnyOrigin]
+    #](b)
+    #var bT = layoutTensorDataTranspose2D[inner, cols](b) # returns (cols, inner)
+    var bT = LayoutTensor[ftype, Layout.row_major(cols, inner), MutAnyOrigin].stack_allocation()
+    _myTensorCopyFrom(src=b, dest = bT, transposed = True)
 
     for i in range(rows):
         for j in range(cols):
-            # var temp = SIMD[ftype, nelts](0.0)
+            #var temp = SIMD[ftype, width](0.0)
             var temp: sftype = 0.0
 
             @parameter
             fn dot_product[width: Int](k: Int) unified {mut}:
                 var v1 = a.load[width](i, k)
-                var v2 = bT.load[width](k, j)
+                var v2 = bT.load[width](j, k)
                 var v3 = v1 * v2
-                temp += v3.reduce_add()  # less accurate but whatever
+                @parameter
+                for k in range(width):
+                    temp[k] += v3[k]
+                #temp += v3.reduce_add()  # less accurate but whatever
 
             vectorize[nelts](inner, dot_product)
-            c[i, j] = temp  # .reduce_add()
+            c[i, j] = temp.reduce_add()
 
 
 fn naiveSoftmax[
@@ -189,9 +203,9 @@ fn layerNorm[
     layout_beta: Layout,
     layout_output: Layout,
 ](
-    x: LayoutTensor[ftype, layout_input, MutAnyOrigin],
-    gamma: LayoutTensor[ftype, layout_gamma, MutAnyOrigin],
-    beta: LayoutTensor[ftype, layout_beta, MutAnyOrigin],
+    x: LayoutTensor[ftype, layout_input],
+    gamma: LayoutTensor[ftype, layout_gamma],
+    beta: LayoutTensor[ftype, layout_beta],
     output: LayoutTensor[ftype, layout_output, MutAnyOrigin],
 ) -> None:
     """
@@ -233,20 +247,20 @@ fn feedForward[
     layout_hidden: Layout,
     act_fn: ActivationFunction = ReLU,
 ](
-    x: LayoutTensor[ftype, layout_x, MutAnyOrigin],
-    w0: LayoutTensor[ftype, layout_w0, MutAnyOrigin],
-    b0: LayoutTensor[ftype, layout_b0, MutAnyOrigin],
-    w1: LayoutTensor[ftype, layout_w1, MutAnyOrigin],
-    b1: LayoutTensor[ftype, layout_b1, MutAnyOrigin],
+    x: LayoutTensor[ftype, layout_x],
+    w0: LayoutTensor[ftype, layout_w0],
+    b0: LayoutTensor[ftype, layout_b0],
+    w1: LayoutTensor[ftype, layout_w1],
+    b1: LayoutTensor[ftype, layout_b1],
     hidden: LayoutTensor[ftype, layout_hidden, MutAnyOrigin],  # internal buffer
-    mut output: LayoutTensor[ftype, layout_x, MutAnyOrigin],
+    output: LayoutTensor[ftype, layout_x, MutAnyOrigin],
 ):
     """
     Linear layers where the middle / hidden
     buffer is of a higher dimension, d_ff.
     """
     # dotProductTiledVectorizedParallelized(x, w0, hidden)
-    naiveDotProduct(x, w0, hidden)
+    #naiveDotProduct(x, w0, hidden)
     weightAndBias(x, w0, b0, hidden)
     act_fn.forward(hidden)
     weightAndBias(hidden, w1, b1, output)
@@ -275,11 +289,11 @@ fn naiveAttention[
     layout2: Layout,
     layout3: Layout,
 ](
-    Q: LayoutTensor[ftype, layout0, MutAnyOrigin],
-    K: LayoutTensor[ftype, layout0, MutAnyOrigin],
-    V: LayoutTensor[ftype, layout1, MutAnyOrigin],
-    mut scores: LayoutTensor[ftype, layout2, MutAnyOrigin],
-    mut scores_probs: LayoutTensor[ftype, layout2, MutAnyOrigin],
+    Q: LayoutTensor[ftype, layout0],
+    K: LayoutTensor[ftype, layout0],
+    V: LayoutTensor[ftype, layout1],
+    scores: LayoutTensor[ftype, layout2, MutAnyOrigin],
+    scores_probs: LayoutTensor[ftype, layout2, MutAnyOrigin],
     output: LayoutTensor[ftype, layout3, MutAnyOrigin],
 ) -> None:
     """
@@ -296,8 +310,8 @@ fn naiveAttention[
     # KT.copy_from(K) # compiler "bug", kills compilation due to unrolling
     _myTensorCopyFrom(src=K, dest=KT)
 
-    # dotProductTiledVectorizedParallelized(Q, KT, scores)
-    naiveDotProduct(Q, KT, scores)
+    dotProductTiledVectorizedParallelized(Q, KT, scores)
+    #naiveDotProduct(Q, KT, scores)
 
     # scores = scores / sqrt(d_k) # TODO: big sizes break compilation bug
     for i in range(scores.shape[0]()):
@@ -313,8 +327,8 @@ fn naiveAttention[
     naiveSoftmax(scores_probs)
 
     # modifies output in-place
-    # dotProductTiledVectorizedParallelized(scores_probs, V, output)
-    naiveDotProduct(scores_probs, V, output)
+    dotProductTiledVectorizedParallelized(scores_probs, V, output)
+    #naiveDotProduct(scores_probs, V, output)
 
     # AT A HIGH LEVEL THIS PERFORMED:
     # var scores = Q @ K^T / sqrt(d_k)
@@ -332,12 +346,31 @@ fn applyCausalMask[
         for j in range(i + 1, seq_len):
             scores[i, j] = sftype(FloatLiteral.negative_infinity)
 
+fn applyMasks[
+        layout_scores: Layout, seq_len: Int](
+                scores: LayoutTensor[ftype, layout_scores, MutAnyOrigin],
+                padding_mask: InlineArray[Bool, seq_len]
+                ) -> None:
+    """Uses the padding mask for variable length sequences, and also applies causal masking."""
+    #comptime seq_len = scores.shape[0]() # == ModelParams.seq_len
+    comptime neg_inf = sftype(FloatLiteral.negative_infinity)
+
+    for i in range(seq_len):
+        if not padding_mask[i]:
+            for j in range(seq_len):
+                scores[i, j] = neg_inf
+            continue
+        for j in range(seq_len):
+            if j > i:
+                scores[i, j] = neg_inf
+            elif not padding_mask[j]:
+                scores[i, j] = neg_inf
 
 fn crossEntropyLoss[
     layout_logits: Layout, layout_targets: Layout
 ](
-    logits: LayoutTensor[ftype, layout_logits, MutAnyOrigin],
-    targets: LayoutTensor[token_itype, layout_targets, MutAnyOrigin],
+    logits: LayoutTensor[ftype, layout_logits],
+    targets: LayoutTensor[token_itype, layout_targets],
     # padding_mask: LayoutTensor[DType.bool, layout_flat],
 ) -> sftype:
     """Computes cross entropy loss."""
@@ -361,3 +394,91 @@ fn crossEntropyLoss[
         total_loss += -(target_logit - log_sum_exp)
 
     return total_loss / seq_len
+
+fn crossEntropyLossMasked[
+        layout_logits: Layout, layout_targets: Layout, layout_mask: Layout, seq_len: Int
+](
+    logits: LayoutTensor[ftype, layout_logits],
+    targets: LayoutTensor[token_itype, layout_targets],
+    padding_mask: InlineArray[Bool, seq_len]
+) -> sftype:
+    """Computes cross entropy loss."""
+    #comptime seq_len = logits.shape[0]()
+    comptime vocab_size = logits.shape[1]()
+
+    var num_real_tokens = 0
+    var total_loss: sftype = 0.0
+    for i in range(seq_len):
+        if not padding_mask[i]:
+            continue
+
+        var max_logit = rebind[sftype](logits[i, 0])
+        for j in range(1, vocab_size):
+            if logits[i, j] > max_logit:
+                max_logit = rebind[sftype](logits[i, j])
+
+        var sum_exp: sftype = 0.0
+        for j in range(vocab_size):
+            sum_exp += exp(rebind[sftype](logits[i, j]) - max_logit)
+        var log_sum_exp = log(sum_exp) + max_logit
+
+        var target_idx = Int(targets[i])
+        var target_logit = rebind[sftype](logits[i, target_idx])
+        total_loss += -(target_logit - log_sum_exp)
+        num_real_tokens += 1
+
+    return total_loss / num_real_tokens
+
+
+def main():
+    var suite = TestSuite()
+    suite.test[matmulCorrectnessTest]()
+    suite.test[powersOfTwoTest]()
+    suite^.run()
+
+def powersOfTwoTest():
+    assert_true(not isPowerOfTwo(0), "0 is not a power of two")
+    assert_true(isPowerOfTwo(1), "1 is a power of two")
+    assert_true(not isPowerOfTwo(3), "3 is not a power of two")
+    assert_true(isPowerOfTwo(4), "4 is a power of two")
+
+    assert_true(not isPowerOfTwo(-25), "-25 is not a power of two AND we reject negative numbers")
+
+fn matmulCorrectnessTest() raises:
+    """Test matrix multiplication against known values."""
+    comptime M = 1 << 7
+    comptime L = 1 << 5
+    comptime N = 1 << 6
+    comptime layout_a = Layout.row_major(M, L)
+    comptime layout_b = Layout.row_major(L, N)
+    comptime layout_c = Layout.row_major(M, N)
+    
+    var a = LayoutTensor[ftype, layout_a, MutAnyOrigin].stack_allocation()
+    var b = LayoutTensor[ftype, layout_b, MutAnyOrigin].stack_allocation()
+    var c = LayoutTensor[ftype, layout_c, MutAnyOrigin].stack_allocation().fill(0)
+    var expected = LayoutTensor[ftype, layout_c, MutAnyOrigin].stack_allocation().fill(0)
+    
+    fillTensorRand(a)
+    fillTensorRand(b)
+
+    # known correct
+    naiveDotProduct(a, b, expected)
+
+    # pick the other to try
+    dotProductTiledVectorizedParallelized[tile_size = 16](a, b, c) # default tile_size = 32
+    #dotProductVectorized(a, b, c) # default tile_size = 32
+    
+    comptime epsilon = 1e-4 # absolute tolerance, relative would be better
+    assert_true(compareBuffers(c.ptr, expected.ptr, comptime(layout_c.size()), epsilon), "matrix multiplication correctness, epsilon: " + String(epsilon))
+
+fn isPowerOfTwo(m: Int) -> Bool:
+    """Brian Kernighan's algorithm for set-bit-counting."""
+    if m < 0:
+        return False
+    var count = 0
+    var n = m
+    while n:
+        n &= (n - 1)
+        count += 1
+
+    return count == 1

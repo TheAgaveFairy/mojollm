@@ -30,7 +30,7 @@ struct ReLU(ActivationFunction):
             var relu = mask.select(nums, zeros)
             x.ptr.store[width=width](i, relu)
 
-        vectorize[nelts](layout.size(), vectorize_closure)
+        vectorize[nelts](comptime(layout.size()), vectorize_closure)
 
     @staticmethod
     @always_inline("nodebug")

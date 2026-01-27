@@ -48,8 +48,7 @@ comptime sftype = Scalar[ftype]  # 's' prefix = 'S'calar
 comptime nelts = simd_width_of[ftype]()
 
 # token IDs stored as:
-comptime token_itype = DType.uint16
-# comptime display = False#os.getenv("DEBUG", "False") == "True"
+comptime token_itype = DType.uint16 # needs to fit vocab_size (~50k for GPT-2)
 comptime display = True if is_defined["DISPLAY"]() else False
 
 
@@ -57,8 +56,9 @@ fn _myTensorCopyFrom[
     layout_a: Layout, layout_b: Layout, d_type: DType
 ](
     *,
-    src: LayoutTensor[d_type, layout_a, MutAnyOrigin],
+    src: LayoutTensor[d_type, layout_a],
     dest: LayoutTensor[d_type, layout_b, MutAnyOrigin],
+    transposed: Bool = False
 ):
     """Automagically handles transposition."""
     constrained[
@@ -70,14 +70,13 @@ fn _myTensorCopyFrom[
     comptime mm = dest.shape[0]()
     comptime nn = dest.shape[1]()
     comptime equal = m == mm and n == nn
-    comptime transposed = m == nn and n == mm
-    comptime valid = equal or transposed and layout_a.size() == layout_b.size()  # just to be safe
+    comptime transposed_valid = m == nn and n == mm
+    comptime valid = equal or transposed_valid and layout_a.size() == layout_b.size()  # just to be safe
     constrained[valid, "Invalid tensor shapes at _myTensorCopyFrom"]()
 
-    @parameter
-    if equal:
-        memcpy(dest=dest.ptr, src=src.ptr, count=layout_a.size())
-    else:  # Transposed!
+    if not transposed:
+        memcpy(dest=dest.ptr, src=src.ptr, count=comptime(layout_a.size()))
+    else:
         # DO NOT PARAMETERIZE THE FOR LOOPS!
         for i in range(m):
             for j in range(n):
@@ -90,26 +89,23 @@ fn _arenaTensorHelper[
     mut arena: BumpArenaAllocator, *, random: Bool = False, std: Float64 = 0.02
 ) -> LayoutTensor[d_type, layout, MutAnyOrigin]:
     var offset_before = arena.offset
-    var ptr = arena.alloc[Scalar[d_type]](layout.size())
+    var ptr = arena.alloc[Scalar[d_type]](comptime(layout.size()))
     var offset_after = arena.offset
-    var expected = layout.size() * size_of[Scalar[d_type]]()
+    var expected = comptime(layout.size()) * size_of[Scalar[d_type]]()
     var actual = offset_after - offset_before
-    if expected != actual:
+    if expected != actual: # TODO: not sure this should be needed, Arena should handle?
         os.abort(
             "Allocation failure! Expected: {} != Actual: {}".format(
                 expected, actual
             )
         )
-    # print("_arenaTensorHelper {}B @{}".format(expected, ptr))
     var tensor = LayoutTensor[d_type, layout, MutAnyOrigin](ptr)
     if random:
-        randn(ptr, layout.size(), 0, std)
-    # else: # we'll just zero the arena to start with instead
-    #    _ = tensor.fill(0)
+        randn(ptr, comptime(layout.size()), 0, std)
     return tensor
 
 
-struct ModelParams:
+struct ModelParams(Writable):
     comptime num_transformer_blocks = 1 << 4
     comptime vocab_size = 1 << 13
 
@@ -169,8 +165,6 @@ trait Weights:
 
 
 struct EmbeddingWeights(Copyable, Weights):
-    # var arena: BumpArenaAllocator
-
     comptime token_embeddings_layout = Layout.row_major(
         ModelParams.vocab_size, ModelParams.d_model
     )
@@ -194,7 +188,6 @@ struct EmbeddingWeights(Copyable, Weights):
     @always_inline("nodebug")
     fn embedTokens(
         self,
-        # token_ids: List[Int],
         token_ids: InlineArray[
             Int, ModelParams.seq_len
         ],  # TODO: should this be InlineArray[Int, seq_len]
@@ -239,8 +232,8 @@ struct EmbeddingWeights(Copyable, Weights):
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_sftype = 0
-        result_in_sftype += Self.token_embeddings_layout.size() * 2
-        result_in_sftype += Self.position_embeddings_layout.size() * 2
+        result_in_sftype += comptime(Self.token_embeddings_layout.size()) * 2
+        result_in_sftype += comptime(Self.position_embeddings_layout.size()) * 2
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
@@ -253,7 +246,6 @@ struct EmbeddingWeights(Copyable, Weights):
 
 
 struct AttentionWeights(Copyable, Movable, Weights):
-    # var arena: BumpArenaAllocator
     comptime W_q_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_k)
     comptime W_v_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_v)
     var W_q: LayoutTensor[ftype, Self.W_q_layout, MutAnyOrigin]
@@ -267,7 +259,6 @@ struct AttentionWeights(Copyable, Movable, Weights):
     var b_v: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        # self.arena = arena
         # weights
         self.W_q = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
         self.W_k = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -280,10 +271,10 @@ struct AttentionWeights(Copyable, Movable, Weights):
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_sftype = 0
-        result_in_sftype += Self.W_q_layout.size() * 2
-        result_in_sftype += Self.W_v_layout.size()
-        result_in_sftype += Self.b_q_layout.size() * 2
-        result_in_sftype += Self.b_v_layout.size()
+        result_in_sftype += comptime(Self.W_q_layout.size()) * 2
+        result_in_sftype += comptime(Self.W_v_layout.size())
+        result_in_sftype += comptime(Self.b_q_layout.size()) * 2
+        result_in_sftype += comptime(Self.b_v_layout.size())
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
@@ -294,15 +285,10 @@ struct AttentionWeights(Copyable, Movable, Weights):
         fillTensorRand(self.W_q, std)
         fillTensorRand(self.W_k, std)
         fillTensorRand(self.W_v, std)
-
-        # fillTensorRand(self.b_q, std)
-        # fillTensorRand(self.b_k, std)
-        # fillTensorRand(self.b_v, std)
+        # biases stay at zeros
 
 
 struct FFWeights(Copyable, Movable, Weights):
-    # var arena: BumpArenaAllocator
-
     comptime w0_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_ff)
     comptime w1_layout = Layout.row_major(ModelParams.d_ff, ModelParams.d_model)
     var w0: LayoutTensor[ftype, Self.w0_layout, MutAnyOrigin]
@@ -314,8 +300,6 @@ struct FFWeights(Copyable, Movable, Weights):
     var b1: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        # self.arena = arena
-
         self.w0 = _arenaTensorHelper[Self.w0_layout, ftype](arena)
         self.b0 = _arenaTensorHelper[Self.b0_layout, ftype](arena)
         self.w1 = _arenaTensorHelper[Self.w1_layout, ftype](arena)
@@ -324,10 +308,10 @@ struct FFWeights(Copyable, Movable, Weights):
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_sftype = 0
-        result_in_sftype += Self.w0_layout.size()
-        result_in_sftype += Self.b0_layout.size()
-        result_in_sftype += Self.w1_layout.size()
-        result_in_sftype += Self.b1_layout.size()
+        result_in_sftype += comptime(Self.w0_layout.size())
+        result_in_sftype += comptime(Self.b0_layout.size())
+        result_in_sftype += comptime(Self.w1_layout.size())
+        result_in_sftype += comptime(Self.b1_layout.size())
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
@@ -336,27 +320,23 @@ struct FFWeights(Copyable, Movable, Weights):
     ):
         self = Self(arena)
         fillTensorRand(self.w0, std)
-        # fillTensorRand(self.b0, std)
         fillTensorRand(self.w1, std)
-        # fillTensorRand(self.b1, std)
+        # biases stay at zeros
 
 
 struct LayerNormWeights(Copyable, Movable, Weights):
-    # var arena: BumpArenaAllocator
-
     comptime gamma_layout = Layout.row_major(ModelParams.d_model)
     var gamma: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        # self.arena = arena
         self.gamma = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
         self.beta = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_sftype = 0
-        result_in_sftype += Self.gamma_layout.size() * 2
+        result_in_sftype += comptime(Self.gamma_layout.size()) * 2
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
@@ -365,12 +345,10 @@ struct LayerNormWeights(Copyable, Movable, Weights):
     ):
         self = Self(arena)
         fillTensorRand(self.gamma, std)
-        # fillTensorRand(self.beta, std)
+        # biases stay at zeros
 
 
 struct OutputWeights(Copyable, Movable, Weights):
-    # var arena: BumpArenaAllocator
-
     comptime W_layout = Layout.row_major(
         ModelParams.d_model, ModelParams.vocab_size
     )
@@ -379,15 +357,14 @@ struct OutputWeights(Copyable, Movable, Weights):
     var b: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        # self.arena = arena
         self.W = _arenaTensorHelper[Self.W_layout, ftype](arena)
         self.b = _arenaTensorHelper[Self.b_layout, ftype](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_sftype = 0
-        result_in_sftype += Self.W_layout.size()
-        result_in_sftype += Self.b_layout.size()
+        result_in_sftype += comptime(Self.W_layout.size())
+        result_in_sftype += comptime(Self.b_layout.size())
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
@@ -396,14 +373,11 @@ struct OutputWeights(Copyable, Movable, Weights):
     ):
         self = Self(arena)
         fillTensorRand(self.W, std)
-        # fillTensorRand(self.b, std)
-
+        # biases stay at zeros
 
 struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
-
-    # var arena: BumpArenaAllocator
 
     var ln_attn: LayerNormWeights
     var attn_weights: AttentionWeights  # single head, causal masking
@@ -442,8 +416,6 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
     var ffn_out: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
 
     fn __init__(out self, mut arena: BumpArenaAllocator):
-        # self.arena = arena
-
         self.ln_attn = LayerNormWeights(arena)
         self.attn_weights = AttentionWeights(arena)
         self.ln_ffn = LayerNormWeights(arena)
@@ -483,17 +455,17 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
         result_in_bytes += LayerNormWeights.sizeInBytes()
         result_in_bytes += FFWeights.sizeInBytes()
 
-        result_in_sftype += Self.X_layout.size() * 2  # pre & post ln attn
-        result_in_sftype += Self.Q_layout.size() * 2  # Q, K
-        result_in_sftype += Self.V_layout.size()  # V
+        result_in_sftype += comptime(Self.X_layout.size()) * 2  # pre & post ln attn
+        result_in_sftype += comptime(Self.Q_layout.size()) * 2  # Q, K
+        result_in_sftype += comptime(Self.V_layout.size())  # V
 
-        result_in_sftype += Self.attn_scores_layout.size() * 2  # scores, probs
-        result_in_sftype += Self.attn_scores_layout.size() * 2  # scores, probs
+        result_in_sftype += comptime(Self.attn_scores_layout.size()) * 2  # scores, probs
+        result_in_sftype += comptime(Self.attn_scores_layout.size()) * 2  # scores, probs
         result_in_sftype += (
-            Self.V_layout.size() * 3
+            comptime(Self.V_layout.size()) * 3
         )  # pre and post residuals, into ffn
-        result_in_sftype += Self.ffn_hidden_layout.size()
-        result_in_sftype += Self.X_layout.size()
+        result_in_sftype += comptime(Self.ffn_hidden_layout.size())
+        result_in_sftype += comptime(Self.X_layout.size())
         return result_in_sftype * size_of[sftype]() + result_in_bytes
 
     @staticmethod
@@ -546,7 +518,6 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
 
         if display:
             print("\tgenerate QKV")
-        # weightAndBias(input, weight, bias, output)
         weightAndBias(
             self.X_post_ln_attn,
             self.attn_weights.W_q,
@@ -686,9 +657,9 @@ struct LLM:
         var result_in_sftype = 0
         var result_in_itype = 0
         var result_in_bytes = 0
-        result_in_itype += ModelParams.seq_len
+        result_in_itype += comptime(ModelParams.seq_len)
 
-        result_in_sftype += TransformerBlock.X_layout.size()
+        result_in_sftype += comptime(TransformerBlock.X_layout.size())
 
         result_in_bytes += EmbeddingWeights.sizeInBytes()
         result_in_bytes += (
@@ -697,8 +668,8 @@ struct LLM:
         result_in_bytes += LayerNormWeights.sizeInBytes()
         result_in_bytes += OutputWeights.sizeInBytes()
 
-        result_in_sftype += TransformerBlock.X_layout.size()
-        result_in_sftype += Self.output_layout.size()
+        result_in_sftype += comptime(TransformerBlock.X_layout.size())
+        result_in_sftype += comptime(Self.output_layout.size())
 
         return (
             (result_in_sftype * size_of[sftype]())
@@ -716,10 +687,9 @@ struct LLM:
         """
         Caller needs to free memory of final output.
         """
-        print("+" * 100)
+        print("Start forward:", "+" * 100)
         # assert_equal(ModelParams.seq_len, len(tokens))
         self.embedding_weights.embedTokens(token_ids, self.embedded_X)
-        # print("EMBEDDED X:\n", self.embedded_X,"\n\n")
         printTensorSlice(self.embedded_X, "embedded X")
 
         var block_output = self.embedded_X.copy()
@@ -763,7 +733,7 @@ struct LLM:
         """
         Call *after* a forward pass. This is not an end-to-end prediction path,
         just an abstraction so we can do temperature based, top-K, etc. types
-        of token selection.
+        of token selection. DETERMINISTIC.
         """
         var last_row = ModelParams.seq_len - 1
         var max_idx = 0

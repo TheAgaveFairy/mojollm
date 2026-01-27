@@ -32,7 +32,6 @@ from cliparser import TokenizerParser
 from tokenchunks import TokenChunks
 
 
-@register_passable("trivial")
 @fieldwise_init
 struct Pair(
     Copyable,
@@ -41,6 +40,7 @@ struct Pair(
     ImplicitlyCopyable,
     ImplicitlyDestructible,
     Representable,
+    TrivialRegisterType,
 ):
     """
     Stores a hashable pair of Ints. There's probably another way to do this,

@@ -18,7 +18,7 @@ fn fillTensorRand[
     std: Float64 = std_std_deviation,
 ):
     """Fills an existing LayoutTensor with a random, normal distribution."""
-    randn(x.ptr, layout.size(), 0, std)  # mean of zero
+    randn(x.ptr, comptime(layout.size()), 0, std)  # mean of zero
 
 
 @always_inline("nodebug")
@@ -29,8 +29,8 @@ fn randTensorHeap[
 ]:
     """Heap allocates and returns a LayoutTensor filled with a random normal distribution.
     """
-    var storage = alloc[sftype](layout.size())
-    randn(storage, layout.size(), 0, 1)
+    var storage = alloc[sftype](comptime(layout.size()))
+    randn(storage, comptime(layout.size()), 0, 1)
     return LayoutTensor[ftype, layout, MutAnyOrigin](storage)
 
 
@@ -39,8 +39,8 @@ fn zeroTensorHeap[
     layout: Layout
 ]() -> LayoutTensor[ftype, layout, MutAnyOrigin]:
     """Heap allocates and returns a LayoutTensor filled with zeros."""
-    var storage = alloc[sftype](layout.size())
-    memset_zero(storage, layout.size())
+    var storage = alloc[sftype](comptime(layout.size()))
+    memset_zero(storage, comptime(layout.size()))
     return LayoutTensor[ftype, layout, MutAnyOrigin](storage)
 
 
@@ -93,11 +93,11 @@ fn systemInfo[ftype: DType]():
 
 
 fn compareBuffers(
-    a: UnsafePointer[Scalar[ftype]], b: UnsafePointer[sftype], length: Int
+        a: UnsafePointer[Scalar[ftype]], b: UnsafePointer[sftype], length: Int, epsilon: sftype = 1e-6
 ) -> Bool:
     """Ensures two buffers are equal within some error bounds (floating point isn't perfect).
     """
-    comptime epsilon = 1e-6
+    #comptime epsilon = 1e-6
     for i in range(length):
         if (a[i] < (b[i] - epsilon)) or (a[i] > (b[i] + epsilon)):
             print("element i", i, ":", a[i], "!=", b[i], file=stderr)

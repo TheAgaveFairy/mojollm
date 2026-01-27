@@ -47,7 +47,7 @@ fn splitInput(toks: List[Int]) -> List[toks_arr]:
     var output = List[toks_arr](capacity=num_sequences)
     for i in range(num_sequences):
         var start = i * sl
-        #var end = (i + 1) * sl
+        # var end = (i + 1) * sl
         var temp = toks_arr(fill=PAD)  # fill with '<|PAD|>' signifier, aka 0
         for t in range(sl):
             temp[t] = toks[start + t]
@@ -97,6 +97,8 @@ fn main() raises:
             for i in range(times):
                 for tok_list in test_input[:5]:
                     print(tok_list)
+                    var decoded_input = tokenizer.decode(List[Int](tok_list))
+                    print(decoded_input)
                     var output = llm.forward(tok_list)
                     tempPrintOutput(output)
                     var predicted_token = llm.getNextTokenGreedy()
@@ -110,9 +112,8 @@ fn main() raises:
             print("time", (end - start) // 1_000, "us for", times, "runs")
             # print("Capacity {} offset {}".format(llm.arena.capacity, llm.arena.offset))
             print(
-                "biases for QKV, ffn, consider looking up what W_o is, causal"
-                " masking, comment things well, cross entropy loss, transformer"
-                " grad buffers, optimizer trait"
+                "biases for QKV, ffn, consider looking up what W_o is,"
+                " transformer grad buffers, optimizer trait (step)"
             )
 
     except e:
