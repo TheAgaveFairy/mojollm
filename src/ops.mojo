@@ -89,9 +89,10 @@ fn dotProductTiledVectorizedParallelized[
 
             for ti in range(tile_size):
                 for tj in range(tile_size):
-
+                    #var ti = tii
+                    #var tj = tjj
                     @parameter
-                    fn dot_product[width: Int](tk: Int) unified {mut}:
+                    fn dot_product[width: Int](tk: Int) unified {read ti, read tj, mut a_tile, mut bT_tile, mut c_tile}:
                         var v1 = a_tile.load[width](ti, tk)
                         var v2 = bT_tile.load[width](tj, tk)
                         var v3 = v1 * v2
