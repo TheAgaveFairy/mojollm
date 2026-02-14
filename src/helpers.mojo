@@ -2,13 +2,50 @@ from sys.info import simd_byte_width, num_logical_cores, simd_width_of
 from reflection import get_linkage_name
 from layout import Layout, LayoutTensor
 from random import randn  # , seed
-from memory import memset, memset_zero
+from memory import memset, memset_zero, memcpy
 from sys import stderr
 
 from attention import ftype, sftype, nelts
 
 comptime std_std_deviation = 0.5
 
+@always_inline("nodebug")
+fn _trans[layout: Layout]() -> Layout:
+    #debug_assert[assert_mode = "safe"](layout.shape[0].is_value(), "this was causing corruption")
+    comptime m = layout.shape[0].value()
+    comptime n = layout.shape[1].value()
+    return Layout.row_major(n, m)
+
+fn _myTensorCopyFrom[
+    layout_a: Layout, layout_b: Layout, d_type: DType
+](
+    *,
+    src: LayoutTensor[d_type, layout_a],
+    dest: LayoutTensor[d_type, layout_b, MutAnyOrigin],
+    transposed: Bool = False
+):
+    """Automagically handles transposition."""
+    constrained[
+        layout_a.rank() == layout_b.rank(),
+        "Invalid tensor ranks at _myTensorCopyFrom",
+    ]()
+    comptime m = src.shape[0]()
+    comptime n = src.shape[1]()
+    comptime mm = dest.shape[0]()
+    comptime nn = dest.shape[1]()
+    comptime equal = m == mm and n == nn
+    comptime transposed_valid = m == nn and n == mm
+    comptime valid = equal or transposed_valid and layout_a.size() == layout_b.size()  # just to be safe
+    constrained[valid, "Invalid tensor shapes at _myTensorCopyFrom"]()
+
+    if not transposed:
+        memcpy(dest=dest.ptr, src=src.ptr, count=comptime(layout_a.size()))
+    else:
+        # DO NOT PARAMETERIZE THE FOR LOOPS!
+        for i in range(m):
+            for j in range(n):
+                dest[j, i] = src[i, j]
+                #dest.ptr[j * m + i] = src.ptr[i * n + j]
 
 @always_inline("nodebug")
 fn fillTensorRand[

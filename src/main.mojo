@@ -8,7 +8,7 @@ from benchmark.compiler import keep
 
 from helpers import systemInfo, randTensorHeap, ColorsEnum, coloredString
 from attention import ftype, token_itype, LLM, TransformerBlock, ModelParams
-from tokenizer import ASCIITokenizer
+from tokenizer import Tokenizer
 from cliparser import TokenizerParser
 from ops import crossEntropyLoss
 
@@ -81,7 +81,7 @@ fn main() raises:
     var args = TokenizerParser()
     try:
         with open(args.input_filename, "r") as f:
-            var tokenizer = ASCIITokenizer.load(
+            var tokenizer = Tokenizer.load(
                 "./models/bpe_8192_shakespeare.tok"
             )
             assert_equal(tokenizer.vocab_size, ModelParams.vocab_size)
@@ -96,9 +96,9 @@ fn main() raises:
             var start = perf_counter_ns()
             for i in range(times):
                 for tok_list in test_input[:5]:
-                    print(tok_list)
+                    print("raw tokens:", tok_list)
                     var decoded_input = tokenizer.decode(List[Int](tok_list))
-                    print(decoded_input)
+                    print("decoded:", decoded_input)
                     var output = llm.forward(tok_list)
                     tempPrintOutput(output)
                     var predicted_token = llm.getNextTokenGreedy()
@@ -112,7 +112,7 @@ fn main() raises:
             print("time", (end - start) // 1_000, "us for", times, "runs")
             # print("Capacity {} offset {}".format(llm.arena.capacity, llm.arena.offset))
             print(
-                "biases for QKV, ffn, consider looking up what W_o is,"
+                    "TODO: backward, logger, better GEMM, consider params to disable backwards buffers, biases for QKV ?, biases ffn, consider looking up what W_o is,"
                 " transformer grad buffers, optimizer trait (step)"
             )
 

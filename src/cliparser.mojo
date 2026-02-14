@@ -1,5 +1,7 @@
 from sys import stderr, argv
+from os import abort
 from pathlib import Path
+from subprocess import run as subProcessRun
 
 # from subprocess import run as subprocessRun
 
@@ -15,6 +17,8 @@ struct TokenizerParser(
     comptime FLAG_SAVE_NAME_SHORT = Self.FLAG_SAVE_NAME[1:3]  # -s
     comptime FLAG_INPUT_FILENAME = "--input-filename"
     comptime FLAG_INPUT_FILENAME_SHORT = Self.FLAG_INPUT_FILENAME[1:3]  # -i
+    comptime FLAG_TAG = "--tag"
+    comptime FLAG_TAG_SHORT = Self.FLAG_TAG[1:3]
 
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
@@ -24,6 +28,7 @@ struct TokenizerParser(
     var vocab_size: Int
     var save_name: String
     var input_filename: String
+    var tag: String
     var had_error: Bool
 
     fn __init__(out self):
@@ -32,6 +37,11 @@ struct TokenizerParser(
         self.vocab_size = 5000
         self.input_filename = "./datasets/shakespeare.txt"
         self.save_name = Self.DUMMY
+        try:
+            var date = subProcessRun("TZ=\"America/New_York\" date +'%d %Y'")
+            self.tag = date
+        except e:
+            self.tag = "none" # TODO: today's date
         self.had_error = False
 
         var i = 1  # skip argv[0] / program name
@@ -43,7 +53,7 @@ struct TokenizerParser(
             ):
                 Self.printHelp()
                 self.had_error = True  # don't run anything
-                break
+                abort("HELP")
             elif (
                 arg == materialize[Self.FLAG_VOCAB]()
                 or arg == materialize[Self.FLAG_VOCAB_SHORT]()
@@ -74,6 +84,16 @@ struct TokenizerParser(
                 else:
                     self.printBoundsError("-s")
                     break
+            elif (
+                arg == materialize[Self.FLAG_TAG]()
+                or arg == materialize[Self.FLAG_TAG_SHORT]()
+            ):
+                if i + 1 < len(args):
+                    self._parseTag(args[i + 1])
+                    i += 2
+                else:
+                    self.printBoundsError("-t")
+                    break
             else:
                 print("unknown flag: " + arg, file=stderr)
                 i += 1
@@ -101,8 +121,16 @@ struct TokenizerParser(
             + "\t-s, --save-name FILENAME\twhat name we will save the tokenizer"
             " to. default = bpe_VOCAB_SIZE.tok.\n"
             + "\t-v, --vocab_size VOCAB_SIZE\tdefault = 5000.\n"
+            + "\t-t, --tag TAG\tdefault = today's date.\n"
         )
         print(help_str)
+
+    fn _parseTag(mut self, tag: StringSlice):
+        if tag[:1] == "-":
+            print("please include the input filename", file=stderr)
+            self.had_error = True
+        else:
+            self.tag = String(tag)
 
     fn _parseInputFilename(mut self, filename: StringSlice):
         if filename[:1] == "-":

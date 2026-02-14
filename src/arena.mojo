@@ -35,8 +35,10 @@ struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
     fn __init__(
         out self, capacity_bytes: Int, extra_space_factor: Float64 = 0.0
     ):
+        #if extra_space_factor < 0.0:
+        #    print("ARENA INIT ERROR! extra_space_factor < 0.0", file=stderr)
         var expanded_size = capacity_bytes + Int(
-            capacity_bytes * extra_space_factor
+            Float64(capacity_bytes) * extra_space_factor
         )
         self.buffer = alloc[UInt8](expanded_size)
         self.capacity = capacity_bytes

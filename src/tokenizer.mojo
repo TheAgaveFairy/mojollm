@@ -40,7 +40,7 @@ struct Pair(
     ImplicitlyCopyable,
     ImplicitlyDestructible,
     Representable,
-    TrivialRegisterType,
+    TrivialRegisterPassable,
 ):
     """
     Stores a hashable pair of Ints. There's probably another way to do this,
@@ -83,7 +83,7 @@ struct Pair(
             raise e^
 
     fn __hash__[H: Hasher](self, mut hasher: H):
-        var hash_me: Int64 = self.a << 16 & self.b
+        var hash_me: Int64 = Int64(self.a) << 16 & Int64(self.b)
         hasher.update(hash_me)
 
     fn __eq__(self, other: Self) -> Bool:
@@ -93,7 +93,7 @@ struct Pair(
         return "(" + String(self.a) + Self.delimeter + String(self.b) + ")"
 
 
-struct ASCIITokenizer(Copyable, Movable):
+struct Tokenizer(Copyable, Movable):
     var vocab_encode: List[Pair]  # "id" is "idx + 256"
     var vocab_size: Int
     var special_tokens: List[String]
@@ -419,7 +419,7 @@ struct ASCIITokenizer(Copyable, Movable):
         """
         var n = len(text_tokens)
         comptime extra_capacity_factor = 0.125  # could tune this to avoid reallocing
-        var bonus = Int(n * extra_capacity_factor)
+        var bonus = Int(Float64(n) * extra_capacity_factor)
         var unmerged = List[Int](
             capacity=n + bonus
         )  # might be BIGGER than this at end
@@ -511,7 +511,7 @@ fn main():
         with open(config.input_filename, "r") as f:
             var text = f.read()
 
-            var tokenizer = ASCIITokenizer(
+            var tokenizer = Tokenizer(
                 config.vocab_size
             )  # ~280 is enough to display recursion
             tokenizer.trainWithProtections(text, True)
@@ -524,7 +524,7 @@ fn main():
 
             # var ratio = compareTrainingTimesTest(text, vocab_size = 1000, runs = 5)
             _ = """
-            var tok2 = ASCIITokenizer.load("bpe_25000.tok")
+            var tok2 = Tokenizer.load("bpe_25000.tok")
             var test_ids = tok2.encode(text[:200])
             for id in test_ids:
                 print(String(id), "\t", tok2.decodeToken(id))
@@ -536,18 +536,18 @@ fn main():
         print(e)
 
 
-fn saveLoadTest(tokenizer: ASCIITokenizer) -> Bool:
+fn saveLoadTest(tokenizer: Tokenizer) -> Bool:
     var filename = "bpe_{}.tok".format(tokenizer.vocab_size)
     try:
         tokenizer.save(filename)
-        var tok2 = ASCIITokenizer.load(filename)
+        var tok2 = Tokenizer.load(filename)
         return tokenizer == tok2
     except e:
         print(e, file=stderr)
         return False
 
 
-fn decodeEncodeTest(tokenizer: ASCIITokenizer, text: StringSlice) -> Bool:
+fn decodeEncodeTest(tokenizer: Tokenizer, text: StringSlice) -> Bool:
     try:
         return text == tokenizer.decode(tokenizer.encode(text))
     except e:
@@ -555,7 +555,7 @@ fn decodeEncodeTest(tokenizer: ASCIITokenizer, text: StringSlice) -> Bool:
         return False
 
 
-fn compareVocabsTest(a: ASCIITokenizer, b: ASCIITokenizer) -> Bool:
+fn compareVocabsTest(a: Tokenizer, b: Tokenizer) -> Bool:
     """
     Takes in two tokenizers to compare their vocabs.
     'a' is the reference implementation, and 'b' is checked against it.
@@ -575,8 +575,8 @@ fn compareVocabsTest(a: ASCIITokenizer, b: ASCIITokenizer) -> Bool:
 fn compareTrainingTimesTest(
     text: StringSlice, vocab_size: Int = 500, runs: Int = 5
 ) -> Float64:
-    var tok_a = ASCIITokenizer(vocab_size)
-    var tok_b = ASCIITokenizer(vocab_size)
+    var tok_a = Tokenizer(vocab_size)
+    var tok_b = Tokenizer(vocab_size)
 
     var accum = 0.0
     for r in range(runs):
@@ -600,7 +600,7 @@ fn compareTrainingTimesTest(
     return accum / runs
 
 
-fn showExample(tokenizer: ASCIITokenizer, encoded: List[Int]) -> String:
+fn showExample(tokenizer: Tokenizer, encoded: List[Int]) -> String:
     var result = ""
     comptime max_len = 250
     for tok in encoded[:max_len]:

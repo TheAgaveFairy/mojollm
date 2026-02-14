@@ -31,6 +31,8 @@ from helpers import (
     fillTensorRand,
     ColorsEnum,
     coloredString,
+    _trans,
+    _myTensorCopyFrom
 )
 from activation_fn import ActivationFunction, ReLU
 from ops import (
@@ -50,37 +52,6 @@ comptime nelts = simd_width_of[ftype]()
 # token IDs stored as:
 comptime token_itype = DType.uint16 # needs to fit vocab_size (~50k for GPT-2)
 comptime display = True if is_defined["DISPLAY"]() else False
-
-
-fn _myTensorCopyFrom[
-    layout_a: Layout, layout_b: Layout, d_type: DType
-](
-    *,
-    src: LayoutTensor[d_type, layout_a],
-    dest: LayoutTensor[d_type, layout_b, MutAnyOrigin],
-    transposed: Bool = False
-):
-    """Automagically handles transposition."""
-    constrained[
-        layout_a.rank() == layout_b.rank(),
-        "Invalid tensor ranks at _myTensorCopyFrom",
-    ]()
-    comptime m = src.shape[0]()
-    comptime n = src.shape[1]()
-    comptime mm = dest.shape[0]()
-    comptime nn = dest.shape[1]()
-    comptime equal = m == mm and n == nn
-    comptime transposed_valid = m == nn and n == mm
-    comptime valid = equal or transposed_valid and layout_a.size() == layout_b.size()  # just to be safe
-    constrained[valid, "Invalid tensor shapes at _myTensorCopyFrom"]()
-
-    if not transposed:
-        memcpy(dest=dest.ptr, src=src.ptr, count=comptime(layout_a.size()))
-    else:
-        # DO NOT PARAMETERIZE THE FOR LOOPS!
-        for i in range(m):
-            for j in range(n):
-                dest[j, i] = src[i, j]
 
 
 fn _arenaTensorHelper[
@@ -104,8 +75,8 @@ fn _arenaTensorHelper[
         randn(ptr, comptime(layout.size()), 0, std)
     return tensor
 
-
-struct ModelParams(Writable):
+@fieldwise_init
+struct ModelParams(Writable, Copyable):
     comptime num_transformer_blocks = 1 << 4
     comptime vocab_size = 1 << 13
 

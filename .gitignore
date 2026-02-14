@@ -11,8 +11,10 @@ perf.data*
 out.perf
 out.folded
 flamegraph*
-claudebackwardsfiles/
+
 main
 
+claudebackwardsfiles/
+logs/
 models/
 datasets/
