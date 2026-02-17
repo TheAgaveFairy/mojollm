@@ -95,9 +95,12 @@ fn main() raises:
             comptime times = 1
             var start = perf_counter_ns()
             for i in range(times):
-                for tok_list in test_input[:5]:
+                for tok_list in test_input[:]:
                     print("raw tokens:", tok_list)
-                    var decoded_input = tokenizer.decode(List[Int](tok_list))
+                    var temp = List[Int](capacity = len(tok_list))
+                    for j in range(len(tok_list)):
+                        temp[j] = tok_list[j]
+                    var decoded_input = tokenizer.decode(temp)
                     print("decoded:", decoded_input)
                     var output = llm.forward(tok_list)
                     tempPrintOutput(output)
