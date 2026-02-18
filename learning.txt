@@ -1,0 +1,33 @@
+Just wanted to track some of the things I learned along the way.
+
+This project started as a way to learn some more GPU operations. I started by implementing attention on CPU, decided that "yes this is fun, let's go all the way to a small LLM" and then started on the LLM.
+
+I started with the attention model and this time made sure to split out my ops into its own file. I didn't want to decouple those from the struct initially, but it makes sense to do so. I realized I'd bit off more than I meant to chew, so this is an area where I found LLMs (mainly Claude 4.5 Haiku and later moving to Sonnet) great for talking about the right balance of abstractions for a toy project.
+
+Pretty soon in, after getting the basic structure down, I decided to split some components of the LLM into their own structs. FFN, LayerNorm, etc.; this was a move I liked for two reasons: I knew I'd need to split the TransformerBlocks out so I could instantiate some set number of them, so I was already breaking away from a pure monolithic entity. Monoliths can be nice - too much abstraction can degrade performance, make things overly complicated, and waste time.
+
+Pretty soon, I realize I'll need to get text into tokens. I could've probably imported from Python but I figured that the time it takes to learn the interop with Python would probably take as long as it would to build a tokenizer from scratch myself, the choice was obvious.
+
+The tokenizer was REALLY fun to write. Flamegraphs, data structures, learning all about the regexp pre-processing... which is also something that I considered a Python answer for but instead had Claude help me build a parser that accomplished a similar function, thus negating the need for a proper library. As soon as there is a Mojo regexp engine, I think I'll bite the bullet and use that, much to my chagrin.
+
+I found pretty early on that parallelizing training text into chunks wasn't helpful. I originally treated viable token segments to merge (as determined by the boundary-creating "regexp" pre-processing) as nested Lists, i.e. List[List[Token]], but of course this isn't great for memory continuity and performance. I think once I created my awesome little TokenChunks struct, performance increased by 30-40% or so, IIRC.
+
+After playing with tiktokenizer, I asked Claude to help me build a visualizer for my tokenizer. It did it in one-shot, and I felt like a vibe-coder. It doesn't handle new lines correctly I don't think, but it's been a great little React(? I don't even know what it is) app for seeing what my tokenizer is actually training to.
+
+At this point, I learned about the TestSuite. It's useful and fun! I started doing this for this side of the project, later for ops and more (I have a long aside to share about transposing LayoutTensors, but that's for another day).
+
+By now, I was starting to think about memory fragmentation not just for Token chunks but for my model as well. For my first NN, I translated a C project to Mojo and believe a lot of my performance loss for the simple CPU case came from the fact that C could allocate my whole struct on the stack, but my version had calls to alloc all over the heap. Having gotten comfortable with the idea of custom allocators from Zig, something I VERY much wish Mojo would adopt, I decided to write my own bump arena allocator. I threw it at Claude for a sanity check, it insisted on making it more general by allowing for mixed data types and alignment checks, and then hooked that up. That feels like it was a really excellent use of my time and a great concept to teach and re-use.
+
+Activation functions got split out into structs. I think this is the first time I fully understood why putting functions into structs that might not have any data affiliated still makes sense, namely for trait adherance and the power of the type system. Finding a backwards implementation for GeLU is hard, ha.
+
+For my logger, the reflection module had just dropped for Mojo so that was perfect time to try it out. After some trait_downcasting was figured out, that helped a ton.
+
+Initially, I was just going to do a very naive ReLU and SGD. I knew it wouldn't be ideal, but Claude and I chatted about that and it was decided to create an Optimizer trait (interface) so I could try other things or expand out. I'm still working on those, first I need to finish the afforementioned refactor of splitting up weights, buffers, gradients, etc., then I can attach those to SGD or ADAM very easily!
+
+This has been a great thing to do. I've still spent time on matmuls, SIMD, all of the other things I like playing with, too. I am calling the matmul in the std library for now, but there's a bug where it won't want to compile with -O0 which is how I build my flamegraphs due to some runtime variables not being folded into constants, from what I can tell. I might try and make the matmul call used across many functions much easier to swap out by abstracting that away using a simple wrapper that can handle different signatures (std is matmul(output_c, input_a, input_b), mine have been matmul(input_a, input_b, output_c), sometimes with parameters like [tile_size: Int = 32]).
+
+The backwards pass has been still kinda rough; I'm still not super comfortable with the math. I have no problems admitting that, so I'm just hoping that Claude gave me the right code to "copy" over (though I'm vectorizing a lot of it, minor tweaks, etc).
+
+Once I'm done with that, I just need to finish the GeLU backwards or just use ReLU, finish hooking up the Logger (did I finish that main struct?), and then run it and see if my loss goes down. From there, the sky is the limit!...
+
+...batching, parallelizing things, different Optimizers, better ops, change to multi-head attention instead of single, FlashAttention, KV caching, RAG, GPU of course, training a big big version, wrapping it and hosting it, teaching people, writing a blog post (hence why this doc exists), benchmarking, trying other kinds of data besides text like MIDI or something could be fun, I could go on...
