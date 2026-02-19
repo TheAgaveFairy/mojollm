@@ -491,10 +491,10 @@ struct Tokenizer(Copyable, Movable):
                 counts[a * s + b] += 1
         return counts^
 
-    fn __copyinit__(out self, other: Self):
-        self.vocab_size = other.vocab_size  # we'll BPE up to this number
-        self.vocab_encode = other.vocab_encode.copy()
-        self.special_tokens = other.special_tokens.copy()
+    fn __copyinit__(out self, copy: Self):
+        self.vocab_size = copy.vocab_size  # we'll BPE up to this number
+        self.vocab_encode = copy.vocab_encode.copy()
+        self.special_tokens = copy.special_tokens.copy()
 
     fn __eq__(self, other: Self) -> Bool:
         var vs = self.vocab_size == other.vocab_size

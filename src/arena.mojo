@@ -6,7 +6,9 @@ from reflection import (
     struct_field_count,
     get_type_name,
 )
-from attention import Weights, ModelParams
+#from attention import Weights, ModelParams
+from llm import ftype, sftype, itype, sitype
+from llm import Weights, ModelParams
 
 # for allocation arena
 from memory import memset_zero
@@ -15,13 +17,21 @@ from sys.info import size_of, align_of
 from testing import assert_equal, TestSuite
 from os import abort
 
-comptime ftype = DType.float32
-comptime sftype = Scalar[ftype]
-comptime itype = DType.uint16
-comptime sitype = Scalar[itype]
+#comptime ftype = DType.float32
+#comptime sftype = Scalar[ftype]
+#comptime itype = DType.uint16
+#comptime sitype = Scalar[itype]
 
+trait Allocator():
+    fn alloc[T: AnyType](mut self, count: Int) -> UnsafePointer[T, MutAnyOrigin]:
+        ...
+    fn reset(mut self):
+        ...
 
-struct BumpArenaAllocator(Copyable, ImplicitlyCopyable):
+    fn clear(mut self):
+        ...
+
+struct BumpArenaAllocator(Copyable, ImplicitlyCopyable, Allocator):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
     # TODO: return Spans?
