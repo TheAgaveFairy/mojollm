@@ -1,16 +1,25 @@
-from random import seed
-from sys import stderr
-from time import perf_counter_ns
-from pathlib import Path
-from testing import assert_equal
+from std.random import seed
+from std.sys import stderr
+from std.sys.info import has_accelerator
+from std.time import perf_counter_ns
+from std.pathlib import Path
+from std.testing import assert_equal
 from layout import Layout, LayoutTensor
-from benchmark.compiler import keep
+from std.benchmark.compiler import keep
 
 from helpers import systemInfo, randTensorHeap, ColorsEnum, coloredString
-from attention import ftype, token_itype, LLM, TransformerBlock, ModelParams
+from attention import (
+    ftype,
+    token_itype,
+    LLM,
+    TransformerBlock,
+    ModelParams,
+    display,
+)
 from tokenizer import Tokenizer
 from cliparser import TokenizerParser
 from ops import crossEntropyLoss
+from mylogger import LLMInferenceRecord, LLMTrainRecord, CSVLogger, getDateTime
 
 
 fn prettyPrintBytes(bytes: Int) -> String:
@@ -74,49 +83,80 @@ fn tempPrintOutput[
     print()
 
 
+fn logFileName(mode: String = "test") -> Path:
+    var temp_log_name = Path("./logs/")
+    temp_log_name /= getDateTime() + "_" + mode + ".csv"
+    return temp_log_name
+
+
 fn main() raises:
     seed(42)
     systemInfo[ftype]()
 
     var args = TokenizerParser()
+    var logger = CSVLogger[LLMInferenceRecord](logFileName())
+    var device = "7600X 32GB"  # "RTX 3070" if has_accelerator() else "7600X"
     try:
         with open(args.input_filename, "r") as f:
-            var tokenizer = Tokenizer.load(
-                "./models/bpe_8192_shakespeare.tok"
-            )
+            var tokenizer = Tokenizer.load("./models/bpe_8192_shakespeare.tok")
             assert_equal(tokenizer.vocab_size, ModelParams.vocab_size)
             var text = f.read()
             var input_tokens = tokenizer.encode(text)
             var test_input = splitInput(input_tokens)
             # printIntSpan(test_input)
+
             print(ModelParams.__str__())
             print("LLM Size In Bytes()", prettyPrintBytes(LLM.sizeInBytes()))
             var llm = LLM()
+
             comptime times = 1
             var start = perf_counter_ns()
             for i in range(times):
                 for tok_list in test_input[:]:
-                    print("raw tokens:", tok_list)
-                    var temp = List[Int](capacity = len(tok_list))
+                    var iter_start = perf_counter_ns()
+                    comptime if display:
+                        print("raw tokens:", tok_list)
+                    var temp = List[Int](capacity=len(tok_list))
                     for j in range(len(tok_list)):
                         temp[j] = tok_list[j]
                     var decoded_input = tokenizer.decode(temp)
-                    print("decoded:", decoded_input)
                     var output = llm.forward(tok_list)
-                    tempPrintOutput(output)
+                    comptime if display:
+                        print("decoded:", decoded_input)
+                        tempPrintOutput(output)
+
                     var predicted_token = llm.getNextTokenGreedy()
-                    print(
-                        "predicted token:",
-                        coloredString(tokenizer.decodeToken(predicted_token)),
+                    var predicted_tokstr = tokenizer.decodeToken(
+                        predicted_token
                     )
+                    comptime if display:
+                        print(
+                            "predicted token:",
+                            coloredString(predicted_tokstr),
+                        )
                     # var tokens_as_tensor = LayoutTensor[
                     # var loss = crossEntropyLoss(output, test_input)
+                    var iter_end = perf_counter_ns()
+                    var iter_elapsed = Int(iter_end - iter_start)
+                    var log_record = LLMInferenceRecord(
+                        device,
+                        0.69,
+                        iter_elapsed,
+                        predicted_tokstr,
+                        0.69,
+                        69,
+                        ModelParams(),
+                        ftype,
+                    )
+                    logger.log(log_record)
             var end = perf_counter_ns()
             print("time", (end - start) // 1_000, "us for", times, "runs")
             # print("Capacity {} offset {}".format(llm.arena.capacity, llm.arena.offset))
             print(
-                    "TODO: backward, logger, better GEMM, consider params to disable backwards buffers, biases for QKV ?, biases ffn, consider looking up what W_o is,"
-                " transformer grad buffers, optimizer trait (step)"
+                "TODO: backward, logger, better GEMM, consider params to"
+                " disable backwards buffers, biases for QKV ?, biases ffn,"
+                " consider looking up what W_o is, transformer grad buffers,"
+                " optimizer trait (step)"
             )
 
     except e:

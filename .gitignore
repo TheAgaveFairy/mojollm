@@ -18,3 +18,5 @@ claudebackwardsfiles/
 logs/
 models/
 datasets/
+old/
+testdir/

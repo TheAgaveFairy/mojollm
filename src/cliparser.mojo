@@ -1,14 +1,12 @@
-from sys import stderr, argv
-from os import abort
-from pathlib import Path
-from subprocess import run as subProcessRun
+from std.sys import stderr, argv
+from std.os import abort
+from std.pathlib import Path
+from std.subprocess import run as subProcessRun
 
 # from subprocess import run as subprocessRun
 
 
-struct TokenizerParser(
-    Copyable, ImplicitlyCopyable, Movable, Representable, Writable
-):
+struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
     comptime FLAG_HELP = "--help"
     comptime FLAG_HELP_SHORT = Self.FLAG_HELP[1:3]  # -h
     comptime FLAG_VOCAB = "--vocab-size"
@@ -41,7 +39,7 @@ struct TokenizerParser(
             var date = subProcessRun("TZ=\"America/New_York\" date +'%d %Y'")
             self.tag = date
         except e:
-            self.tag = "none" # TODO: today's date
+            self.tag = "none"  # TODO: today's date
         self.had_error = False
 
         var i = 1  # skip argv[0] / program name
@@ -53,7 +51,8 @@ struct TokenizerParser(
             ):
                 Self.printHelp()
                 self.had_error = True  # don't run anything
-                abort("HELP")
+                # abort("HELP")
+                return
             elif (
                 arg == materialize[Self.FLAG_VOCAB]()
                 or arg == materialize[Self.FLAG_VOCAB_SHORT]()

@@ -1,23 +1,23 @@
 from layout import Layout, LayoutTensor
-from math import sqrt, exp, log, ceildiv
-from random import random_float64, random_si64, randint, randn, rand, seed
-from sys.info import (
+from std.math import sqrt, exp, log, ceildiv
+from std.random import random_float64, random_si64, randint, randn, rand, seed
+from std.sys.info import (
     simd_bit_width,
     simd_byte_width,
     simd_width_of,
     num_logical_cores,
 )  # sizeof moved
-from sys import stderr, is_big_endian
-from utils.index import IndexList
-import os
-from memory import memcpy, memset, memset_zero
-from time import perf_counter_ns
-from algorithm.functional import vectorize, parallelize
+from std.sys import stderr, is_big_endian
+from std.utils.index import IndexList
+import std.os
+from std.memory import memcpy, memset, memset_zero
+from std.time import perf_counter_ns
+from std.algorithm.functional import vectorize, parallelize
 from linalg.matmul import matmul
 
 # from kernels.nn.softmax import softmax
-from testing import TestSuite, assert_equal, assert_true
-from benchmark import compiler
+from std.testing import TestSuite, assert_equal, assert_true
+from std.benchmark import compiler
 
 from attention import ftype, sftype, token_itype, nelts, _myTensorCopyFrom, _trans
 from activation_fn import ActivationFunction, ReLU
@@ -30,9 +30,9 @@ fn weightAndBias[
     layout_bias: Layout,
     layout_output: Layout,
 ](
-    input: LayoutTensor[ftype, layout_input],
-    weights: LayoutTensor[ftype, layout_weights],
-    biases: LayoutTensor[ftype, layout_bias],
+    input: LayoutTensor[ftype, layout_input, _],
+    weights: LayoutTensor[ftype, layout_weights, _],
+    biases: LayoutTensor[ftype, layout_bias, _],
     output: LayoutTensor[ftype, layout_output, MutAnyOrigin],
 ) -> None:
     """
@@ -60,8 +60,8 @@ fn weightAndBias[
 fn dotProductTiledVectorizedParallelized[
     layout_a: Layout, layout_b: Layout, layout_c: Layout, tile_size: Int = 32
 ](
-    a: LayoutTensor[ftype, layout_a],
-    b: LayoutTensor[ftype, layout_b],
+    a: LayoutTensor[ftype, layout_a, _],
+    b: LayoutTensor[ftype, layout_b, _],
     c: LayoutTensor[ftype, layout_c, MutAnyOrigin],
 ) -> None:
     """
@@ -76,13 +76,9 @@ fn dotProductTiledVectorizedParallelized[
     comptime are_powers_of_two = isPowerOfTwo(M) and isPowerOfTwo(
         L
     ) and isPowerOfTwo(N) and isPowerOfTwo(tile_size)
-    constrained[
-        tile_small_enough,
-        "Tile size too big for matrices of sizes {} {} {}.".format(M, L, N),
-    ]()
-    constrained[
-        are_powers_of_two, "Shapes of tiled matmul not powers of two."
-    ]()
+    comptime assert tile_small_enough,
+        "Tile size too big, dotProductTiledVectorizedParallelized"
+    comptime assert are_powers_of_two, "Shapes of tiled matmul not powers of two."
 
     comptime num_tiles_m = M // tile_size
     comptime num_tiles_n = N // tile_size
@@ -133,8 +129,8 @@ fn dotProductTiledVectorizedParallelized[
 fn naiveDotProduct[
     layout_a: Layout, layout_b: Layout, layout_c: Layout
 ](
-    a: LayoutTensor[ftype, layout_a],
-    b: LayoutTensor[ftype, layout_b],
+    a: LayoutTensor[ftype, layout_a, _],
+    b: LayoutTensor[ftype, layout_b, _],
     c: LayoutTensor[ftype, layout_c, MutAnyOrigin],
 ) -> None:
     """
@@ -155,8 +151,8 @@ fn naiveDotProduct[
 fn dotProductVectorized[
     layout_a: Layout, layout_b: Layout, layout_c: Layout
 ](
-    a: LayoutTensor[ftype, layout_a],
-    b: LayoutTensor[ftype, layout_b],
+    a: LayoutTensor[ftype, layout_a, _],
+    b: LayoutTensor[ftype, layout_b, _],
     c: LayoutTensor[ftype, layout_c, MutAnyOrigin],
 ) -> None:
     """
@@ -192,8 +188,7 @@ fn dotProductVectorized[
                 var v2 = bT.load[width](j, k)
                 var v3 = v1 * v2
 
-                @parameter
-                for k in range(width):
+                comptime for k in range(width):
                     temp[k] += v3[k]
                 # temp += v3.reduce_add()  # less accurate but whatever
 
@@ -233,9 +228,9 @@ fn layerNorm[
     layout_beta: Layout,
     layout_output: Layout,
 ](
-    x: LayoutTensor[ftype, layout_input],
-    gamma: LayoutTensor[ftype, layout_gamma],
-    beta: LayoutTensor[ftype, layout_beta],
+    x: LayoutTensor[ftype, layout_input, _],
+    gamma: LayoutTensor[ftype, layout_gamma, _],
+    beta: LayoutTensor[ftype, layout_beta, _],
     output: LayoutTensor[ftype, layout_output, MutAnyOrigin],
 ) -> None:
     """
@@ -277,11 +272,11 @@ fn feedForward[
     layout_hidden: Layout,
     act_fn: ActivationFunction = ReLU,
 ](
-    x: LayoutTensor[ftype, layout_x],
-    w0: LayoutTensor[ftype, layout_w0],
-    b0: LayoutTensor[ftype, layout_b0],
-    w1: LayoutTensor[ftype, layout_w1],
-    b1: LayoutTensor[ftype, layout_b1],
+    x: LayoutTensor[ftype, layout_x, _],
+    w0: LayoutTensor[ftype, layout_w0, _],
+    b0: LayoutTensor[ftype, layout_b0, _],
+    w1: LayoutTensor[ftype, layout_w1, _],
+    b1: LayoutTensor[ftype, layout_b1, _],
     hidden: LayoutTensor[ftype, layout_hidden, MutAnyOrigin],  # internal buffer
     output: LayoutTensor[ftype, layout_x, MutAnyOrigin],
 ):
@@ -293,7 +288,7 @@ fn feedForward[
     act_fn.forward(hidden)
     weightAndBias(hidden, w1, b1, output)
 
-
+@deprecated("Don't fully trust this, needs testing.")
 @always_inline("nodebug")
 fn layoutTensorDataTranspose2D[
     rows: Int, cols: Int
@@ -317,9 +312,9 @@ fn naiveAttention[
     layout2: Layout,
     layout3: Layout,
 ](
-    Q: LayoutTensor[ftype, layout0],
-    K: LayoutTensor[ftype, layout0],
-    V: LayoutTensor[ftype, layout1],
+    Q: LayoutTensor[ftype, layout0, _],
+    K: LayoutTensor[ftype, layout0, _],
+    V: LayoutTensor[ftype, layout1, _],
     scores: LayoutTensor[ftype, layout2, MutAnyOrigin],
     scores_probs: LayoutTensor[ftype, layout2, MutAnyOrigin],
     output: LayoutTensor[ftype, layout3, MutAnyOrigin],
@@ -405,8 +400,8 @@ fn applyMasks[
 fn crossEntropyLoss[
     layout_logits: Layout, layout_targets: Layout
 ](
-    logits: LayoutTensor[ftype, layout_logits],
-    targets: LayoutTensor[token_itype, layout_targets],
+    logits: LayoutTensor[ftype, layout_logits, _],
+    targets: LayoutTensor[token_itype, layout_targets, _],
     # padding_mask: LayoutTensor[DType.bool, layout_flat],
 ) -> sftype:
     """Computes cross entropy loss."""
@@ -438,8 +433,8 @@ fn crossEntropyLossMasked[
     layout_mask: Layout,
     seq_len: Int,
 ](
-    logits: LayoutTensor[ftype, layout_logits],
-    targets: LayoutTensor[token_itype, layout_targets],
+    logits: LayoutTensor[ftype, layout_logits, _],
+    targets: LayoutTensor[token_itype, layout_targets, _],
     padding_mask: InlineArray[Bool, seq_len],
 ) -> sftype:
     """Computes cross entropy loss."""
@@ -477,7 +472,7 @@ fn accumulateGrads[
     layout: Layout
 ](
     *,
-    src: LayoutTensor[ftype, layout],
+    src: LayoutTensor[ftype, layout, _],
     dest: LayoutTensor[ftype, layout, MutAnyOrigin],
 ):
     """Element-wise addition with SIMD."""
@@ -495,17 +490,14 @@ fn accumulateGrads[
 fn crossEntropyLossBackward[
     layout: Layout, seq_len: Int
 ](
-    logits: LayoutTensor[ftype, layout],
+    logits: LayoutTensor[ftype, layout, _],
     target_tokens: InlineArray[Int, seq_len],
     d_logits: LayoutTensor[ftype, layout, MutAnyOrigin],
 ):
     """Computes gradient of cross-entropy loss with respect to logits.
     dL / d_logits[i, j] = softmax(logits)[i,j] - one_hot[i,j]
     Modifies d_logits in-place."""
-    constrained[
-        seq_len == logits.shape[0](),
-        "Invalid seq_len for cross-entropy backwards.",
-    ]()
+    comptime assert seq_len == logits.shape[0](), "Invalid seq_len for cross-entropy backwards."
     comptime vocab_size = logits.shape[1]()
 
     var logits_temp = type_of(logits).stack_allocation().fill(0.0)
@@ -535,8 +527,8 @@ fn weightAndBiasBackward[
     layout_bias: Layout,
     layout_d_output: Layout,
 ](
-    input: LayoutTensor[ftype, layout_input],
-    weights: LayoutTensor[ftype, layout_weights],
+    input: LayoutTensor[ftype, layout_input, _],
+    weights: LayoutTensor[ftype, layout_weights, _],
     d_output: LayoutTensor[ftype, layout_d_output, MutAnyOrigin],
     d_input: LayoutTensor[ftype, layout_input, MutAnyOrigin],
     d_weights: LayoutTensor[ftype, layout_weights, MutAnyOrigin],
@@ -600,9 +592,9 @@ fn weightAndBiasBackward[
     """
 
 fn layerNormBackward[layout_input: Layout, layout_output: Layout, layout_gamma: Layout](
-        x: LayoutTensor[ftype, layout_input],
-        gamma: LayoutTensor[ftype, layout_gamma],
-        d_output: LayoutTensor[ftype, layout_output],
+        x: LayoutTensor[ftype, layout_input, _],
+        gamma: LayoutTensor[ftype, layout_gamma, _],
+        d_output: LayoutTensor[ftype, layout_output, _],
         d_input: LayoutTensor[ftype, layout_input, MutAnyOrigin],
         d_gamma: LayoutTensor[ftype, layout_gamma, MutAnyOrigin],
         d_beta: LayoutTensor[ftype, layout_gamma, MutAnyOrigin]):
@@ -667,13 +659,13 @@ fn feedForwardBackward[
         layout_hidden: Layout,
     act_fn: ActivationFunction = ReLU,
 ](
-    x: LayoutTensor[ftype, layout_x],
-    w0: LayoutTensor[ftype, layout_w0],
-    b0: LayoutTensor[ftype, layout_b0],
-    w1: LayoutTensor[ftype, layout_w1],
-    b1: LayoutTensor[ftype, layout_b1],
-    hidden: LayoutTensor[ftype, layout_hidden],
-    d_output: LayoutTensor[ftype, layout_x],
+    x: LayoutTensor[ftype, layout_x, _],
+    w0: LayoutTensor[ftype, layout_w0, _],
+    b0: LayoutTensor[ftype, layout_b0, _],
+    w1: LayoutTensor[ftype, layout_w1, _],
+    b1: LayoutTensor[ftype, layout_b1, _],
+    hidden: LayoutTensor[ftype, layout_hidden, _],
+    d_output: LayoutTensor[ftype, layout_x, _],
     d_x: LayoutTensor[ftype, layout_x, MutAnyOrigin],
     d_w0: LayoutTensor[ftype, layout_w0, MutAnyOrigin],
     d_b0: LayoutTensor[ftype, layout_b0, MutAnyOrigin],
@@ -705,12 +697,12 @@ fn naiveAttentionBackward[
         layout_attn: Layout,
         layout_output: Layout,
 ](
-        Q: LayoutTensor[ftype, layout_q],
-        K: LayoutTensor[ftype, layout_k],
-        V: LayoutTensor[ftype, layout_v],
-        attn_scores: LayoutTensor[ftype, layout_scores],
-        attn_probs: LayoutTensor[ftype, layout_attn],
-        d_output: LayoutTensor[ftype, layout_output],
+        Q: LayoutTensor[ftype, layout_q, _],
+        K: LayoutTensor[ftype, layout_k, _],
+        V: LayoutTensor[ftype, layout_v, _],
+        attn_scores: LayoutTensor[ftype, layout_scores, _],
+        attn_probs: LayoutTensor[ftype, layout_attn, _],
+        d_output: LayoutTensor[ftype, layout_output, _],
         d_Q: LayoutTensor[ftype, layout_q, MutAnyOrigin],
         d_K: LayoutTensor[ftype, layout_k, MutAnyOrigin],
         d_V: LayoutTensor[ftype, layout_v, MutAnyOrigin],

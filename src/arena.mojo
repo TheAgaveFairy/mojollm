@@ -1,37 +1,46 @@
 # for reflection
 from layout import Layout, LayoutTensor
-from reflection import (
+from std.reflection import (
     struct_field_types,
     struct_field_names,
     struct_field_count,
     get_type_name,
 )
-#from attention import Weights, ModelParams
-from llm import ftype, sftype, itype, sitype
-from llm import Weights, ModelParams
+
+# from attention import Weights, ModelParams
+from llm import ftype, sftype  # , token_itype
+from llm import token_itype as itype
+
+comptime sitype = Scalar[itype]
+from attention import Weights, ModelParams
 
 # for allocation arena
-from memory import memset_zero
-from sys import stderr
-from sys.info import size_of, align_of
-from testing import assert_equal, TestSuite
-from os import abort
+from std.memory import memset_zero
+from std.sys import stderr
+from std.sys.info import size_of, align_of
+from std.testing import assert_equal, TestSuite
+from std.os import abort
 
-#comptime ftype = DType.float32
-#comptime sftype = Scalar[ftype]
-#comptime itype = DType.uint16
-#comptime sitype = Scalar[itype]
+# comptime ftype = DType.float32
+# comptime sftype = Scalar[ftype]
+# comptime itype = DType.uint16
+# comptime sitype = Scalar[itype]
 
-trait Allocator():
-    fn alloc[T: AnyType](mut self, count: Int) -> UnsafePointer[T, MutAnyOrigin]:
+
+trait Allocator:
+    fn alloc[
+        T: AnyType
+    ](mut self, count: Int) -> UnsafePointer[T, MutAnyOrigin]:
         ...
+
     fn reset(mut self):
         ...
 
     fn clear(mut self):
         ...
 
-struct BumpArenaAllocator(Copyable, ImplicitlyCopyable, Allocator):
+
+struct BumpArenaAllocator(Allocator, Copyable, ImplicitlyCopyable):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
     # TODO: return Spans?
@@ -45,7 +54,7 @@ struct BumpArenaAllocator(Copyable, ImplicitlyCopyable, Allocator):
     fn __init__(
         out self, capacity_bytes: Int, extra_space_factor: Float64 = 0.0
     ):
-        #if extra_space_factor < 0.0:
+        # if extra_space_factor < 0.0:
         #    print("ARENA INIT ERROR! extra_space_factor < 0.0", file=stderr)
         var expanded_size = capacity_bytes + Int(
             Float64(capacity_bytes) * extra_space_factor
@@ -119,9 +128,9 @@ fn printFields[T: AnyType]():
     comptime f_types = struct_field_types[T]()
     comptime f_names = struct_field_names[T]()
 
-    @parameter
-    for i in range(struct_field_count[T]()):
-        print("\t", f_names[i], ":", get_type_name[f_types[i]]())
+    # @parameter
+    comptime for i in range(struct_field_count[T]()):
+        print("\t", materialize[f_names[i]](), ":", get_type_name[f_types[i]]())
 
 
 fn printTypeInfo[T: DType]():
@@ -156,12 +165,13 @@ def test_allocator_offsets():
 
 @deprecated("alloc now aborts instead of raises")
 def test_allocation_failure():
-    var arena = BumpArenaAllocator(5)
-    try:
-        var ptr = arena.alloc[sftype](10)
-    except e:
-        _ = e
-        assert_equal(0, 0)
+    # var arena = BumpArenaAllocator(5)
+    # try:
+    #    var ptr = arena.alloc[sftype](10)
+    # except e:
+    #    _ = e
+    #    assert_equal(0, 0)
+    assert_equal(0, 0)
 
 
 def test_allocator_clear():
@@ -199,12 +209,12 @@ struct TestWeights(Weights):
     fn __init__(out self, arena: BumpArenaAllocator):
         self.arena = arena
         self.a = type_of(self.a)(
-            self.arena.alloc[sftype](self.a.layout.size())
+            self.arena.alloc[sftype](comptime (self.layout.size()))
         ).fill(3.0)
 
     @staticmethod
     fn sizeInBytes() -> Int:
-        return Self.layout.size() * size_of[ftype]()
+        return comptime (Self.layout.size()) * size_of[ftype]()
 
     @staticmethod
     fn initRandom(
@@ -229,13 +239,13 @@ struct TestContainer:
             self.sizeInBytes() + TestWeights.sizeInBytes()
         )
         self.a = type_of(self.a)(
-            self.arena.alloc[sftype](self.a.layout.size())
+            self.arena.alloc[sftype](comptime (self.layout.size()))
         ).fill(1.0)
         self.sub_weights = TestWeights.initRandom(self.arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
-        return Self.layout.size() * size_of[sftype]()
+        return comptime (Self.layout.size()) * size_of[sftype]()
 
     fn __del__(deinit self):
         pass

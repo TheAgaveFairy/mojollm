@@ -1,23 +1,24 @@
 from layout import Layout, LayoutTensor
-from math import sqrt, exp, log, ceildiv
-from random import random_float64, random_si64, randint, randn, rand, seed
-from sys.info import (
+from std.math import sqrt, exp, log, ceildiv
+from std.random import random_float64, random_si64, randint, randn, rand, seed
+from std.sys.info import (
     simd_width_of,
     num_logical_cores,
 )  # sizeof moved
-from sys import stderr, is_big_endian, argv
-from utils.index import IndexList
-import os
-from memory import memcpy, memset, memset_zero
-from time import perf_counter_ns
-from algorithm.functional import vectorize, parallelize
-from reflection import get_linkage_name
-from compile import compile_info
-import benchmark  # run, Unit.ms
-from hashlib.hasher import Hasher, default_hasher
-from utils.lock import BlockingSpinLock
-from os.atomic import Atomic
-from collections import Set
+from std.sys import stderr, is_big_endian, argv
+from std.utils.index import IndexList
+import std.os
+from std.memory import memcpy, memset, memset_zero
+from std.time import perf_counter_ns
+from std.algorithm.functional import vectorize, parallelize
+from std.reflection import get_linkage_name
+from std.compile import compile_info
+import std.benchmark  # run, Unit.ms
+from std.hashlib.hasher import Hasher, default_hasher
+
+# from std.utils.lock import BlockingSpinLock
+# from std.os.atomic import Atomic
+from std.collections import Set
 
 # from python import Python # for RegExp engines
 
@@ -39,8 +40,8 @@ struct Pair(
     Hashable,
     ImplicitlyCopyable,
     ImplicitlyDestructible,
-    Representable,
     TrivialRegisterPassable,
+    Writable,
 ):
     """
     Stores a hashable pair of Ints. There's probably another way to do this,
@@ -91,6 +92,9 @@ struct Pair(
 
     fn __repr__(self) -> String:
         return "(" + String(self.a) + Self.delimeter + String(self.b) + ")"
+
+    fn __str__(self) -> String:
+        return self.__repr__()
 
 
 struct Tokenizer(Copyable, Movable):
@@ -239,9 +243,7 @@ struct Tokenizer(Copyable, Movable):
         #    print(chunk)
         return chunks^
 
-    fn trainWithProtections(
-        mut self, text: StringSlice, debug_display: Bool = False
-    ):
+    fn train(mut self, text: StringSlice, debug_display: Bool = False):
         """
         Byte Pair Encoding. Text is assumed to be ASCII. Implements "regexp".
         """
@@ -458,7 +460,10 @@ struct Tokenizer(Copyable, Movable):
         var c = pair.a
         var d = pair.b
 
-        for chunk in chunks:
+        # for chunk in chunks: # iterator deprecated due to origins update @Nick in Discord
+        var chunk_idx = 0
+        while chunks.get(chunk_idx):
+            var chunk = chunks.get(chunk_idx).value()
             var m = len(chunk)
             var temp = List[Int]()
             var i = 0
@@ -474,6 +479,7 @@ struct Tokenizer(Copyable, Movable):
             if i < m:
                 temp.append(chunk[i])
             merged.addChunk(temp^)
+            chunk_idx += 1
 
         return merged^
 
@@ -484,11 +490,15 @@ struct Tokenizer(Copyable, Movable):
         giant training dataset.
         """
         var counts = List[Int](length=s * s, fill=0)  # UInt16
-        for chunk in chunks:
+        # for chunk in chunks:
+        var chunk_idx = 0
+        while chunks.get(chunk_idx):
+            var chunk = chunks.get(chunk_idx).value()
             for i in range(len(chunk) - 1):
                 var a = chunk[i]
                 var b = chunk[i + 1]
                 counts[a * s + b] += 1
+            chunk_idx += 1
         return counts^
 
     fn __copyinit__(out self, copy: Self):
@@ -506,6 +516,8 @@ struct Tokenizer(Copyable, Movable):
 fn main():
     # tests
     var config = TokenizerParser()
+    if config.had_error:
+        return
 
     try:
         with open(config.input_filename, "r") as f:
@@ -514,7 +526,7 @@ fn main():
             var tokenizer = Tokenizer(
                 config.vocab_size
             )  # ~280 is enough to display recursion
-            tokenizer.trainWithProtections(text, True)
+            tokenizer.train(text, True)
             # print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
             # print(showExample(tokenizer, tokenizer.encode(text[:500])))
             tokenizer.save(config.save_name)
@@ -579,17 +591,17 @@ fn compareTrainingTimesTest(
     var tok_b = Tokenizer(vocab_size)
 
     var accum = 0.0
-    for r in range(runs):
+    for _ in range(runs):
         var start = perf_counter_ns()
         # tok_a.train(text)
         var mid = perf_counter_ns()
         # tok_b.trainParallelized(text, num_logical_cores())
-        tok_b.trainWithProtections(text)
+        tok_b.train(text)
         var end = perf_counter_ns()
 
         var single_ms = (mid - start) // 1_000_000
         var multi_ms = (end - mid) // 1_000_000
-        var ratio = multi_ms / single_ms
+        var ratio = Float64(multi_ms) / Float64(single_ms)
         accum += ratio
         print(
             compareVocabsTest(tok_a, tok_b),
@@ -597,7 +609,7 @@ fn compareTrainingTimesTest(
             ratio,
             "times faster.",
         )
-    return accum / runs
+    return accum / Float64(runs)
 
 
 fn showExample(tokenizer: Tokenizer, encoded: List[Int]) -> String:

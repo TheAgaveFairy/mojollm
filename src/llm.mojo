@@ -1,7 +1,7 @@
 from layout import Layout, LayoutTensor
-from math import sqrt, exp, log, ceildiv
-from random import random_float64, random_si64, randint, randn, rand, seed
-from sys.info import (
+from std.math import sqrt, exp, log, ceildiv
+from std.random import random_float64, random_si64, randint, randn, rand, seed
+from std.sys.info import (
     simd_bit_width,
     simd_byte_width,
     simd_width_of,
@@ -9,15 +9,15 @@ from sys.info import (
     size_of,
     align_of,
 )
-from sys import stderr, is_big_endian, is_defined
-from utils.index import IndexList
-import os
-from memory import memcpy, memset, memset_zero
-from time import perf_counter_ns
-from algorithm.functional import vectorize, parallelize
-from reflection import get_linkage_name
-from compile import compile_info
-import benchmark  # run, Unit.ms
+from std.sys import stderr, is_big_endian, is_defined
+from std.utils.index import IndexList
+import std.os
+from std.memory import memcpy, memset, memset_zero
+from std.time import perf_counter_ns
+from std.algorithm.functional import vectorize, parallelize
+from std.reflection import get_linkage_name
+from std.compile import compile_info
+import std.benchmark  # run, Unit.ms
 
 # from kernels.nn.softmax import softmax
 
@@ -33,6 +33,7 @@ from helpers import (
     coloredString,
     _trans,
     _myTensorCopyFrom,
+    _arenaTensorHelper,
 )
 from activation_fn import ActivationFunction, ReLU
 from ops import (
@@ -44,6 +45,7 @@ from ops import (
     applyCausalMask,
 )
 from arena import BumpArenaAllocator, Allocator
+from attention import Weights, ModelParams
 
 comptime ftype = DType.float32
 comptime sftype = Scalar[ftype]  # 's' prefix = 'S'calar
@@ -61,7 +63,7 @@ comptime display = True if is_defined["DISPLAY"]() else False
 
 
 struct EmbeddingWeights(Copyable, Weights):
-    """Just the learnable parameters for embeddings"""
+    """Just the learnable parameters for embeddings."""
 
     comptime token_embeddings_layout = Layout.row_major(
         ModelParams.vocab_size, ModelParams.d_model
@@ -76,7 +78,7 @@ struct EmbeddingWeights(Copyable, Weights):
         ftype, Self.position_embeddings_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.token_embeddings = _arenaTensorHelper[
             Self.token_embeddings_layout, ftype
         ](arena)
@@ -92,7 +94,9 @@ struct EmbeddingWeights(Copyable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: Allocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.token_embeddings, std)
         fillTensorRand(self.position_embeddings, std)
@@ -101,7 +105,9 @@ struct EmbeddingWeights(Copyable, Weights):
     fn embedTokens(
         self,
         token_ids: InlineArray[Int, ModelParams.seq_len],
-        mut X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin],
+        mut X: LayoutTensor[
+            ftype, TransformerBlockActivations.X_layout, MutAnyOrigin
+        ],
     ):
         """
         Helper function for the forward pass of my LLM. Just wanted where this
@@ -127,7 +133,7 @@ struct EmbeddingWeights(Copyable, Weights):
 
 
 struct AttentionWeights(Copyable, Movable, Weights):
-    """Just the learnable parameters for attention"""
+    """Just the learnable parameters for attention."""
 
     comptime W_q_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_k)
     comptime W_v_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_v)
@@ -141,7 +147,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
     var b_k: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         # weights
         self.W_q = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
         self.W_k = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -162,7 +168,9 @@ struct AttentionWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: Allocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.W_q, std)
         fillTensorRand(self.W_k, std)
@@ -171,7 +179,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
 
 
 struct FFNWeights(Copyable, Movable, Weights):
-    """Just the learnable parameters for feed-forward network"""
+    """Just the learnable parameters for feed-forward network."""
 
     comptime w0_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_ff)
     comptime w1_layout = Layout.row_major(ModelParams.d_ff, ModelParams.d_model)
@@ -183,7 +191,7 @@ struct FFNWeights(Copyable, Movable, Weights):
     var b0: LayoutTensor[ftype, Self.b0_layout, MutAnyOrigin]
     var b1: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.w0 = _arenaTensorHelper[Self.w0_layout, ftype](arena)
         self.b0 = _arenaTensorHelper[Self.b0_layout, ftype](arena)
         self.w1 = _arenaTensorHelper[Self.w1_layout, ftype](arena)
@@ -199,7 +207,9 @@ struct FFNWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: Allocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.w0, std)
         fillTensorRand(self.w1, std)
@@ -207,7 +217,7 @@ struct FFNWeights(Copyable, Movable, Weights):
 
 
 struct LayerNormWeights(Copyable, Movable, Weights):
-    """Just the learnable parameters for layer normalization"""
+    """Just the learnable parameters for layer normalization."""
 
     comptime gamma_layout = Layout.row_major(ModelParams.d_model)
     comptime beta_layout = Layout.row_major(ModelParams.d_model)
@@ -215,7 +225,7 @@ struct LayerNormWeights(Copyable, Movable, Weights):
     var gamma: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta: LayoutTensor[ftype, Self.beta_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.gamma = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
         self.beta = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
 
@@ -226,14 +236,16 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: Allocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.gamma, std)
         # biases stay at zeros
 
 
 struct OutputWeights(Copyable, Movable, Weights):
-    """Just the learnable parameters for final output projection"""
+    """Just the learnable parameters for final output projection."""
 
     comptime W_layout = Layout.row_major(
         ModelParams.d_model, ModelParams.vocab_size
@@ -243,7 +255,7 @@ struct OutputWeights(Copyable, Movable, Weights):
     var W: LayoutTensor[ftype, Self.W_layout, MutAnyOrigin]
     var b: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.W = _arenaTensorHelper[Self.W_layout, ftype](arena)
         self.b = _arenaTensorHelper[Self.b_layout, ftype](arena)
 
@@ -255,25 +267,27 @@ struct OutputWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: Allocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         fillTensorRand(self.W, std)
         # biases stay at zeros
 
 
 struct TransformerBlockWeights(Copyable):
-    """All learnable parameters for one transformer block"""
+    """All learnable parameters for one transformer block."""
 
     var ln_attn: LayerNormWeights
-    var attn: AttentionWeights
+    var attn_weights: AttentionWeights
     var ln_ffn: LayerNormWeights
-    var ffn: FFNWeights
+    var ffn_weights: FFNWeights
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.ln_attn = LayerNormWeights(arena)
         self.attn_weights = AttentionWeights(arena)
         self.ln_ffn = LayerNormWeights(arena)
-        self.ffn_weights = FFWeights(arena)
+        self.ffn_weights = FFNWeights(arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -282,42 +296,45 @@ struct TransformerBlockWeights(Copyable):
         result_in_bytes += LayerNormWeights.sizeInBytes()
         result_in_bytes += AttentionWeights.sizeInBytes()
         result_in_bytes += LayerNormWeights.sizeInBytes()
-        result_in_bytes += FFWeights.sizeInBytes()
+        result_in_bytes += FFNWeights.sizeInBytes()
         return result_in_bytes
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: Allocator, std: Float64 = 0.02):
+    fn initRandom(
+        out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
+    ):
         self = Self(arena)
         self.ln_attn = LayerNormWeights.initRandom(arena)
         self.attn_weights = AttentionWeights.initRandom(arena)
         self.ln_ffn = LayerNormWeights.initRandom(arena)
-        self.ffn_weights = FFWeights.initRandom(arena)
+        self.ffn_weights = FFNWeights.initRandom(arena)
 
 
-struct LLMWeights:
-    """All learnable parameters for the entire model - can be shared across batches
+struct LLMWeights(Copyable):
+    """All learnable parameters for the entire model - can be shared across batches.
     """
 
-    var arena: Allocator
+    # var arena: BumpArenaAllocator
     var embedding: EmbeddingWeights
-    var blocks: List[TransformerBlockWeights]
+    var blocks: InlineArray[
+        TransformerBlockWeights, ModelParams.num_transformer_blocks
+    ]
     var ln_final: LayerNormWeights
     var output: OutputWeights
 
-    fn __init__(out self):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         var arena_size_in_bytes = Self.sizeInBytes()
-        self.arena = BumpArenaAllocator(arena_size_in_bytes)
-        self.arena.clear()  # memset_zeros the whole thing
+        # self.arena = BumpArenaAllocator(arena_size_in_bytes)
+        # self.arena.clear()  # memset_zeros the whole thing
 
-        self.embedding_weights = EmbeddingWeights.initRandom(self.arena)
+        self.embedding = EmbeddingWeights.initRandom(arena)
 
         # this will create a single temp TransformerBlock, copy it to each location, then delete the temp
         self.blocks = type_of(self.blocks)(
-            length=ModelParams.num_transformer_blocks,
-            fill=TransformerBlock.initRandom(self.arena),
+            fill=TransformerBlockWeights.initRandom(arena),
         )
-        self.ln_final_weights = LayerNormWeights.initRandom(self.arena)
-        self.output_weights = OutputWeights.initRandom(self.arena)
+        self.ln_final = LayerNormWeights.initRandom(arena)
+        self.output = OutputWeights.initRandom(arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -335,7 +352,7 @@ struct LLMWeights:
     fn saveToFile(self, path: String):
         pass
 
-    fn loadFromFile(out self, path: String):
+    fn loadFromFile(self, path: String) -> String:
         pass
 
 
@@ -344,25 +361,29 @@ struct LLMWeights:
 # ============================================================================
 
 
-struct EmbeddingActivations:
+struct EmbeddingActivations(Copyable):
     """Forward pass buffers for embeddings"""
 
-    var embedded_X: LayoutTensor[ftype, TransformerBlock.X_layout, MutAnyOrigin]
+    var embedded_X: LayoutTensor[
+        ftype, TransformerBlockActivations.X_layout, MutAnyOrigin
+    ]
 
-    fn __init__(out self, mut arena: Allocator):
-        self.embedded_X = _arenaTensorHelper[TransformerBlock.X_layout, ftype](
-            arena
-        )
+    fn __init__(out self, mut arena: BumpArenaAllocator):
+        self.embedded_X = _arenaTensorHelper[
+            TransformerBlockActivations.X_layout, ftype
+        ](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_sftype = 0
-        result_in_sftype += comptime (TransformerBlock.X_layout.size())
+        result_in_sftype += comptime (
+            TransformerBlockActivations.X_layout.size()
+        )
         return result_in_sftype * size_of[sftype]()
 
 
-struct AttentionActivations:
-    """Forward pass buffers for attention - what you need to compute attention
+struct AttentionActivations(Copyable):
+    """Forward pass buffers for attention - what you need to compute attention.
     """
 
     comptime X_layout = Layout.row_major(
@@ -393,7 +414,7 @@ struct AttentionActivations:
         ftype, Self.attn_out_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.X_post_ln_attn = _arenaTensorHelper[Self.X_layout](arena)
         self.Q = _arenaTensorHelper[Self.Q_layout](arena)
         self.K = _arenaTensorHelper[Self.K_layout](arena)
@@ -422,8 +443,8 @@ struct AttentionActivations:
         return result_in_sftype * size_of[sftype]()
 
 
-struct FFNActivations:
-    """Forward pass buffers for feed-forward network"""
+struct FFNActivations(Copyable):
+    """Forward pass buffers for feed-forward network."""
 
     comptime input_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.d_model
@@ -439,7 +460,7 @@ struct FFNActivations:
     var ffn_hidden: LayoutTensor[ftype, Self.hidden_layout, MutAnyOrigin]
     var ffn_out: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.ffn_input = _arenaTensorHelper[Self.input_layout](arena)
         self.ffn_hidden = _arenaTensorHelper[Self.hidden_layout](arena)
         self.ffn_out = _arenaTensorHelper[Self.output_layout](arena)
@@ -454,8 +475,8 @@ struct FFNActivations:
         return result_in_sftype * size_of[sftype]()
 
 
-struct TransformerBlockActivations:
-    """All forward pass buffers for one transformer block"""
+struct TransformerBlockActivations(Copyable):
+    """All forward pass buffers for one transformer block."""
 
     comptime X_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.d_model
@@ -465,7 +486,7 @@ struct TransformerBlockActivations:
     var attn: AttentionActivations
     var ffn: FFNActivations
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.X_pre_ln_attn = _arenaTensorHelper[Self.X_layout](arena)
         self.attn = AttentionActivations(arena)
         self.ffn = FFNActivations(arena)
@@ -482,8 +503,8 @@ struct TransformerBlockActivations:
         return result_in_sftype * size_of[sftype]() + result_in_bytes
 
 
-struct LLMActivations:
-    """All forward pass buffers for one sequence - allocate one per batch element
+struct LLMActivations(Copyable):
+    """All forward pass buffers for one sequence - allocate one per batch element.
     """
 
     comptime input_layout = Layout.row_major(ModelParams.seq_len)
@@ -491,28 +512,33 @@ struct LLMActivations:
         ModelParams.seq_len, ModelParams.vocab_size
     )
 
-    # var arena: Allocator
+    # var arena: BumpArenaAllocator
     var input_token_ids: LayoutTensor[
         token_itype, Self.input_layout, MutAnyOrigin
     ]
     var embedding: EmbeddingActivations
-    var blocks: List[TransformerBlockActivations]
+    var blocks: InlineArray[
+        TransformerBlockActivations, ModelParams.num_transformer_blocks
+    ]
     var final_ln_output: LayoutTensor[
-        ftype, TransformerBlock.X_layout, MutAnyOrigin
+        ftype, TransformerBlockActivations.X_layout, MutAnyOrigin
     ]
     var logits: LayoutTensor[ftype, Self.logits_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
-        self.input_token_ids = AttentionActivations(arena)
+    fn __init__(out self, mut arena: BumpArenaAllocator):
+        self.input_token_ids = _arenaTensorHelper[
+            Self.input_layout, token_itype
+        ](
+            arena
+        )  # AttentionActivations(arena)
         self.embedding = EmbeddingActivations(arena)
         # this will create a single temp TransformerBlock, copy it to each location, then delete the temp
         self.blocks = type_of(self.blocks)(
-            length=ModelParams.num_transformer_blocks,
-            fill=TransformerBlockActivations(self.arena),
+            fill=TransformerBlockActivations(arena),
         )
-        self.final_ln_output = _arenaTensorHelper[TransformerBlock.X_layout](
-            arena
-        )
+        self.final_ln_output = _arenaTensorHelper[
+            TransformerBlockActivations.X_layout
+        ](arena)
         self.logits = _arenaTensorHelper[Self.logits_layout](arena)
 
     @staticmethod
@@ -527,7 +553,9 @@ struct LLMActivations:
             * ModelParams.num_transformer_blocks
         )
 
-        result_in_sftype += comptime (TransformerBlock.X_layout.size())
+        result_in_sftype += comptime (
+            TransformerBlockActivations.X_layout.size()
+        )
         result_in_sftype += comptime (Self.logits_layout.size())
 
         return result_in_sftype * size_of[sftype]() + result_in_bytes
@@ -538,7 +566,7 @@ struct LLMActivations:
 # ============================================================================
 
 
-struct EmbeddingGradients:
+struct EmbeddingGradients(Copyable):
     """Gradient accumulators for embeddings"""
 
     comptime token_embeddings_layout = Layout.row_major(
@@ -555,7 +583,7 @@ struct EmbeddingGradients:
         ftype, Self.position_embeddings_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.token_embeddings_grad = _arenaTensorHelper[
             Self.token_embeddings_layout
         ](arena)
@@ -581,7 +609,7 @@ struct EmbeddingGradients:
         )
 
 
-struct AttentionGradients:
+struct AttentionGradients(Copyable):
     """Gradient accumulators for attention"""
 
     comptime W_q_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_k)
@@ -596,7 +624,7 @@ struct AttentionGradients:
     var b_k_grad: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v_grad: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         # weights
         self.W_q_grad = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
         self.W_k_grad = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -626,8 +654,8 @@ struct AttentionGradients:
         memset_zero(self.b_v_grad.ptr, comptime (Self.b_v_layout.size()))
 
 
-struct FFNGradients:
-    """Gradient accumulators for feed-forward network"""
+struct FFNGradients(Copyable):
+    """Gradient accumulators for feed-forward network."""
 
     comptime w0_layout = Layout.row_major(ModelParams.d_model, ModelParams.d_ff)
     comptime w1_layout = Layout.row_major(ModelParams.d_ff, ModelParams.d_model)
@@ -639,7 +667,7 @@ struct FFNGradients:
     var b0_grad: LayoutTensor[ftype, Self.b0_layout, MutAnyOrigin]
     var b1_grad: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.w0_grad = _arenaTensorHelper[Self.w0_layout](arena)
         self.w1_grad = _arenaTensorHelper[Self.w1_layout](arena)
         self.b0_grad = _arenaTensorHelper[Self.b0_layout](arena)
@@ -661,8 +689,8 @@ struct FFNGradients:
         memset_zero(self.b1_grad.ptr, comptime (Self.b1_layout.size()))
 
 
-struct LayerNormGradients:
-    """Gradient accumulators for layer normalization"""
+struct LayerNormGradients(Copyable):
+    """Gradient accumulators for layer normalization."""
 
     comptime gamma_layout = Layout.row_major(ModelParams.d_model)
     comptime beta_layout = Layout.row_major(ModelParams.d_model)
@@ -670,7 +698,7 @@ struct LayerNormGradients:
     var gamma_grad: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta_grad: LayoutTensor[ftype, Self.beta_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.gamma_grad = _arenaTensorHelper[Self.gamma_layout](arena)
         self.beta_grad = _arenaTensorHelper[Self.beta_layout](arena)
 
@@ -686,8 +714,8 @@ struct LayerNormGradients:
         memset_zero(self.beta_grad.ptr, comptime (Self.beta_layout.size()))
 
 
-struct OutputGradients:
-    """Gradient accumulators for final output projection"""
+struct OutputGradients(Copyable):
+    """Gradient accumulators for final output projection."""
 
     comptime W_layout = Layout.row_major(
         ModelParams.d_model, ModelParams.vocab_size
@@ -697,9 +725,9 @@ struct OutputGradients:
     var W_grad: LayoutTensor[ftype, Self.W_layout, MutAnyOrigin]
     var b_grad: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.W_grad = _arenaTensorHelper[Self.W_layout](arena)
-        self.b_grad = _arenaTensorHelper[Self.W_layout](arena)
+        self.b_grad = _arenaTensorHelper[Self.b_layout](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -713,19 +741,19 @@ struct OutputGradients:
         memset_zero(self.b_grad.ptr, comptime (Self.b_layout.size()))
 
 
-struct TransformerBlockGradients:
-    """All gradient accumulators for one transformer block"""
+struct TransformerBlockGradients(Copyable):
+    """All gradient accumulators for one transformer block."""
 
     var ln_attn: LayerNormGradients
     var attn: AttentionGradients
     var ln_ffn: LayerNormGradients
     var ffn: FFNGradients
 
-    fn __init__(out self, mut arena: Allocator):
-        self.ln_attn = LayerNormWeights(arena)
-        self.attn_weights = AttentionWeights(arena)
-        self.ln_ffn = LayerNormWeights(arena)
-        self.ffn_weights = FFWeights(arena)
+    fn __init__(out self, mut arena: BumpArenaAllocator):
+        self.ln_attn = LayerNormGradients(arena)
+        self.attn = AttentionGradients(arena)
+        self.ln_ffn = LayerNormGradients(arena)
+        self.ffn = FFNGradients(arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -744,19 +772,21 @@ struct TransformerBlockGradients:
         self.ffn.zero()
 
 
-struct LLMGradients:
-    """All gradient accumulators for the entire model - accumulate over batch"""
+struct LLMGradients(Copyable):
+    """All gradient accumulators for the entire model - accumulate over batch.
+    """
 
-    # var arena: Allocator
+    # var arena: BumpArenaAllocator
     var embedding: EmbeddingGradients
-    var blocks: List[TransformerBlockGradients]
+    var blocks: InlineArray[
+        TransformerBlockGradients, ModelParams.num_transformer_blocks
+    ]
     var ln_final: LayerNormGradients
     var output: OutputGradients
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.embedding = EmbeddingGradients(arena)
         self.blocks = type_of(self.blocks)(
-            length=ModelParams.num_transformer_blocks,
             fill=TransformerBlockGradients(arena),
         )
         self.ln_final = LayerNormGradients(arena)
@@ -776,8 +806,8 @@ struct LLMGradients:
 
     fn zero(mut self):
         self.embedding.zero()
-        for block in self.blocks:
-            block.zero()
+        comptime for i in range(ModelParams.num_transformer_blocks):
+            self.blocks[i].zero()
         self.ln_final.zero()
         self.output.zero()
 
@@ -788,8 +818,8 @@ struct LLMGradients:
 # ============================================================================
 
 
-struct AttentionBackwardBuffers:
-    """Buffers needed during attention backward pass"""
+struct AttentionBackwardBuffers(Copyable):
+    """Buffers needed during attention backward pass."""
 
     comptime X_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.d_model
@@ -811,7 +841,7 @@ struct AttentionBackwardBuffers:
     var d_attn_probs: LayoutTensor[ftype, Self.attn_scores_layout, MutAnyOrigin]
     var d_X_post_ln_attn: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.d_Q = _arenaTensorHelper[Self.Q_layout](arena)
         self.d_K = _arenaTensorHelper[Self.Q_layout](arena)
         self.d_V = _arenaTensorHelper[Self.Q_layout](arena)
@@ -821,7 +851,7 @@ struct AttentionBackwardBuffers:
         self.d_X_post_ln_attn = _arenaTensorHelper[Self.X_layout](arena)
 
     @staticmethod
-    fn sizeInBytes():
+    fn sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.Q_layout.size()) * 3
         result_in_sftype += comptime (Self.attn_scores_layout.size()) * 2
@@ -829,8 +859,8 @@ struct AttentionBackwardBuffers:
         return result_in_sftype * size_of[sftype]()
 
 
-struct FFNBackwardBuffers:
-    """Buffers needed during FFN backward pass"""
+struct FFNBackwardBuffers(Copyable):
+    """Buffers needed during FFN backward pass."""
 
     comptime input_layout = Layout.row_major(
         ModelParams.seq_len, ModelParams.d_model
@@ -842,9 +872,9 @@ struct FFNBackwardBuffers:
     var d_ffn_input: LayoutTensor[ftype, Self.input_layout, MutAnyOrigin]
     var d_ffn_hidden: LayoutTensor[ftype, Self.hidden_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.d_ffn_input = _arenaTensorHelper[Self.input_layout](arena)
-        self.d_ffn_input = _arenaTensorHelper[Self.hidden_layout](arena)
+        self.d_ffn_hidden = _arenaTensorHelper[Self.hidden_layout](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -854,40 +884,41 @@ struct FFNBackwardBuffers:
         return result_in_sftype * size_of[sftype]()
 
 
-struct TransformerBlockBackwardBuffers:
-    """All backward buffers for one transformer block"""
+struct TransformerBlockBackwardBuffers(Copyable):
+    """All backward buffers for one transformer block."""
 
     var attn: AttentionBackwardBuffers
     var ffn: FFNBackwardBuffers
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.attn = AttentionBackwardBuffers(arena)
         self.ffn = FFNBackwardBuffers(arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
         var result_in_bytes = 0
-        result_in_bytes += AttentionBackwardBuffers(arena)
-        result_in_bytes += FFNBackwardBuffers(arena)
+        result_in_bytes += AttentionBackwardBuffers.sizeInBytes()
+        result_in_bytes += FFNBackwardBuffers.sizeInBytes()
         return result_in_bytes
 
 
-struct LLMBackwardBuffers:
-    """All backward pass buffers - allocate once for training"""
+struct LLMBackwardBuffers(Copyable):
+    """All backward pass buffers - allocate once for training."""
 
-    var blocks: List[TransformerBlockBackwardBuffers]
+    var blocks: InlineArray[
+        TransformerBlockBackwardBuffers, ModelParams.num_transformer_blocks
+    ]
     var d_final_ln_input: LayoutTensor[
-        ftype, TransformerBlock.X_layout, MutAnyOrigin
+        ftype, TransformerBlockActivations.X_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.blocks = type_of(self.blocks)(
-            length=ModelParams.num_transformer_blocks,
             fill=TransformerBlockBackwardBuffers(arena),
         )
-        self.d_final_ln_input = _arenaTensorHelper[TransformerBlock.X_layout](
-            arena
-        )
+        self.d_final_ln_input = _arenaTensorHelper[
+            TransformerBlockActivations.X_layout
+        ](arena)
 
     @staticmethod
     fn sizeInBytes() -> Int:
@@ -897,7 +928,9 @@ struct LLMBackwardBuffers:
             TransformerBlockBackwardBuffers.sizeInBytes()
             * ModelParams.num_transformer_blocks
         )
-        result_in_sftype += comptime (TransformerBlock.X_layout.size())
+        result_in_sftype += comptime (
+            TransformerBlockActivations.X_layout.size()
+        )
         return result_in_sftype * size_of[sftype]() + result_in_bytes
 
 
@@ -907,7 +940,7 @@ struct LLMBackwardBuffers:
 
 
 struct AdamOptimizerState:
-    """First and second moment estimates for Adam optimizer"""
+    """First and second moment estimates for Adam optimizer."""
 
     # Mirrors the structure of LLMGradients, but stores momentum
     var momentum: LLMGradients  # Only need one copy for momentum
@@ -915,7 +948,7 @@ struct AdamOptimizerState:
 
     var t: Int  # timestep for bias correction
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.momentum = LLMGradients(arena)
         self.velocity = LLMGradients(arena)
         self.t = 0
@@ -937,11 +970,11 @@ struct AdamOptimizerState:
 
 
 struct SGDOptimizerState:
-    """For SGD with momentum (optional)"""
+    """For SGD with momentum (optional)."""
 
     var velocity: LLMGradients  # Only need one copy for momentum
 
-    fn __init__(out self, mut arena: Allocator):
+    fn __init__(out self, mut arena: BumpArenaAllocator):
         self.velocity = LLMGradients(arena)
 
     @staticmethod
@@ -963,60 +996,62 @@ struct SGDOptimizerState:
 # ============================================================================
 
 
-fn inference_example():
-    """How you'd use this for inference with batching"""
-    # Load weights once
-    var weights = LLMWeights()
-    weights.loadFromFile("model.weights")
+def main():
+    return
+    _ = """
+    fn inference_example():
+        # Load weights once
+        var weights = LLMWeights()
+        weights.loadFromFile("model.weights")
 
-    # Allocate activations for each batch slot
-    var batch_size = 4
-    var batch_activations = List[LLMActivations](capacity=batch_size)
-    for i in range(batch_size):
-        batch_activations.append(LLMActivations())
-
-    # Run inference on each sequence
-    for i in range(batch_size):
-        var tokens = get_input_tokens(i)
-        forward(weights, batch_activations[i], tokens)
-        var next_token = greedy_decode(batch_activations[i].logits)
-
-
-fn training_example():
-    """How you'd use this for training"""
-    # Initialize everything
-    var weights = LLMWeights()  # or load from checkpoint
-    var gradients = LLMGradients()
-    var optimizer = AdamOptimizerState()
-
-    # For each training step
-    var batch_size = 8
-    for step in range(num_steps):
-        # Zero gradients at start of batch
-        gradients.zero()
-
-        # Accumulate gradients over batch
+        var arena = BumpArenaAllocator(1 << 26) # 64MB
+        # Allocate activations for each batch slot
+        var batch_size = 4
+        var batch_activations = List[LLMActivations](capacity=batch_size)
         for i in range(batch_size):
-            var activations = LLMActivations()
-            var backward_buffers = LLMBackwardBuffers()
+            batch_activations.append(LLMActivations(arena))
 
-            var tokens = get_training_tokens(i)
-            forward(weights, activations, tokens)
-
-            var loss_grad = compute_loss_gradient(
-                activations.logits, targets[i]
-            )
-            backward(
-                weights, activations, backward_buffers, loss_grad, gradients
-            )
-
-        # Update weights with accumulated gradients
-        optimizer.step(weights, gradients, lr=0.001)
+        # Run inference on each sequence
+        for i in range(batch_size):
+            var tokens = get_input_tokens(i)
+            forward(weights, batch_activations[i], tokens)
+            var next_token = greedy_decode(batch_activations[i].logits)
 
 
-fn memory_efficient_inference():
-    """For inference only, you don't need gradients or optimizer state"""
-    var weights = LLMWeights()
-    var activations = LLMActivations()
+    fn training_example():
+        # Initialize everything
+        var weights = LLMWeights()  # or load from checkpoint
+        var gradients = LLMGradients()
+        var optimizer = AdamOptimizerState()
 
-    ...
+        # For each training step
+        var batch_size = 8
+        for step in range(num_steps):
+            # Zero gradients at start of batch
+            gradients.zero()
+
+            # Accumulate gradients over batch
+            for i in range(batch_size):
+                var activations = LLMActivations()
+                var backward_buffers = LLMBackwardBuffers()
+
+                var tokens = get_training_tokens(i)
+                forward(weights, activations, tokens)
+
+                var loss_grad = compute_loss_gradient(
+                    activations.logits, targets[i]
+                )
+                backward(
+                    weights, activations, backward_buffers, loss_grad, gradients
+                )
+
+            # Update weights with accumulated gradients
+            optimizer.step(weights, gradients, lr=0.001)
+
+
+    fn memory_efficient_inference():
+        var weights = LLMWeights()
+        var activations = LLMActivations()
+
+        ...
+    """
