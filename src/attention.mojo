@@ -11,7 +11,7 @@ from std.sys.info import (
 )
 from std.sys import stderr, is_big_endian, is_defined
 from std.utils.index import IndexList
-import std.os
+from std.os import abort
 from std.memory import memcpy, memset, memset_zero
 from std.time import perf_counter_ns
 from std.algorithm.functional import vectorize, parallelize
@@ -67,7 +67,7 @@ fn _arenaTensorHelper[
     if (
         expected != actual
     ):  # TODO: not sure this should be needed, Arena should handle?
-        os.abort(
+        abort(
             "Allocation failure! Expected: {} != Actual: {}".format(
                 expected, actual
             )

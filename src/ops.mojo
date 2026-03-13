@@ -20,7 +20,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 from std.benchmark import compiler
 
 from attention import ftype, sftype, token_itype, nelts, _myTensorCopyFrom, _trans
-from activation_fn import ActivationFunction, ReLU
+from activation_fn import ActivationFunction, ReLU, GELU, GELUTanh, GELUFast
 from helpers import compareBuffers, fillTensorRand
 
 
@@ -270,7 +270,7 @@ fn feedForward[
     layout_w1: Layout,
     layout_b1: Layout,
     layout_hidden: Layout,
-    act_fn: ActivationFunction = ReLU,
+    act_fn: ActivationFunction = GELUFast,
 ](
     x: LayoutTensor[ftype, layout_x, _],
     w0: LayoutTensor[ftype, layout_w0, _],
@@ -657,7 +657,7 @@ fn feedForwardBackward[
         layout_w1: Layout,
         layout_b1: Layout,
         layout_hidden: Layout,
-    act_fn: ActivationFunction = ReLU,
+    act_fn: ActivationFunction = GELUFast,
 ](
     x: LayoutTensor[ftype, layout_x, _],
     w0: LayoutTensor[ftype, layout_w0, _],

@@ -44,6 +44,7 @@ fn printIntSpan[o: Origin](tokens: Span[Int, o]):
 comptime toks_arr = InlineArray[Int, ModelParams.seq_len]
 
 
+# TODO: move to tokenizer
 fn splitInput(toks: List[Int]) -> List[toks_arr]:
     """Left pads and splits into seq_len chunks! No special tokens handled here.
     """
@@ -94,6 +95,8 @@ fn main() raises:
     systemInfo[ftype]()
 
     var args = TokenizerParser()
+    if args.had_error:
+        return
     var logger = CSVLogger[LLMInferenceRecord](logFileName())
     var device = "7600X 32GB"  # "RTX 3070" if has_accelerator() else "7600X"
     try:

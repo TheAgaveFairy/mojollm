@@ -93,6 +93,12 @@ struct Pair(
     fn __repr__(self) -> String:
         return "(" + String(self.a) + Self.delimeter + String(self.b) + ")"
 
+    fn write_to(self, mut writer: Some[Writer]):
+        writer.write(self.__repr__())
+
+    fn write_repr_to(self, mut writer: Some[Writer]):
+        writer.write(self.__repr__())
+
     fn __str__(self) -> String:
         return self.__repr__()
 
