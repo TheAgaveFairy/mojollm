@@ -100,7 +100,7 @@ struct BumpArenaAllocator(Allocator, Copyable, ImplicitlyCopyable):
         self.offset = 0
 
 
-def main():
+def main() raises:
     """Tests here. Some reflection examples to start if you `uncomment`."""
     _ = """
     printTypeInfo[ftype]()
@@ -141,7 +141,7 @@ fn printTypeInfo[T: DType]():
     print(thing)
 
 
-def test_allocator_offsets():
+def test_allocator_offsets() raises:
     var size_in_bytes = 12 * size_of[sftype]() + size_of[sitype]() * 3
     var c_arena = BumpArenaAllocator(size_in_bytes)
     try:
@@ -164,7 +164,7 @@ def test_allocator_offsets():
 
 
 @deprecated("alloc now aborts instead of raises")
-def test_allocation_failure():
+def test_allocation_failure() raises:
     # var arena = BumpArenaAllocator(5)
     # try:
     #    var ptr = arena.alloc[sftype](10)
@@ -174,7 +174,7 @@ def test_allocation_failure():
     assert_equal(0, 0)
 
 
-def test_allocator_clear():
+def test_allocator_clear() raises:
     var arena = BumpArenaAllocator(128)
     var ptr = arena.alloc[sitype](10)
     for i in range(10):
@@ -184,7 +184,7 @@ def test_allocator_clear():
         assert_equal(ptr[i], 0)
 
 
-def test_allocator_reset():
+def test_allocator_reset() raises:
     var arena = BumpArenaAllocator(128)
     var ptr0 = arena.alloc[UInt8](128)
     arena.reset()

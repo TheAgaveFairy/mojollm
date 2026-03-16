@@ -8,15 +8,15 @@ from std.subprocess import run as subProcessRun
 
 struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
     comptime FLAG_HELP = "--help"
-    comptime FLAG_HELP_SHORT = Self.FLAG_HELP[1:3]  # -h
+    comptime FLAG_HELP_SHORT = Self.FLAG_HELP[byte=1:3]  # -h
     comptime FLAG_VOCAB = "--vocab-size"
-    comptime FLAG_VOCAB_SHORT = Self.FLAG_VOCAB[1:3]  # -v
+    comptime FLAG_VOCAB_SHORT = Self.FLAG_VOCAB[byte=1:3]  # -v
     comptime FLAG_SAVE_NAME = "--save-name"
-    comptime FLAG_SAVE_NAME_SHORT = Self.FLAG_SAVE_NAME[1:3]  # -s
+    comptime FLAG_SAVE_NAME_SHORT = Self.FLAG_SAVE_NAME[byte=1:3]  # -s
     comptime FLAG_INPUT_FILENAME = "--input-filename"
-    comptime FLAG_INPUT_FILENAME_SHORT = Self.FLAG_INPUT_FILENAME[1:3]  # -i
+    comptime FLAG_INPUT_FILENAME_SHORT = Self.FLAG_INPUT_FILENAME[byte=1:3]  # -i
     comptime FLAG_TAG = "--tag"
-    comptime FLAG_TAG_SHORT = Self.FLAG_TAG[1:3]
+    comptime FLAG_TAG_SHORT = Self.FLAG_TAG[byte=1:3]
 
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
@@ -125,28 +125,28 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
         print(help_str)
 
     fn _parseTag(mut self, tag: StringSlice):
-        if tag[:1] == "-":
+        if tag[byte=0] == "-":
             print("please include the input filename", file=stderr)
             self.had_error = True
         else:
             self.tag = String(tag)
 
     fn _parseInputFilename(mut self, filename: StringSlice):
-        if filename[:1] == "-":
+        if filename[byte=0] == "-":
             print("please include the input filename", file=stderr)
             self.had_error = True
         else:
             self.input_filename = String(filename)
 
     fn _parseSaveName(mut self, filename: StringSlice):
-        if filename[:1] == "-":
+        if filename[byte=0] == "-":
             print("please include the save filename", file=stderr)
             self.had_error = True
         else:
             self.save_name = String(filename)
 
     fn _parseVocabSize(mut self, vocab_size: StringSlice):
-        if vocab_size[:1] == "-":
+        if vocab_size[byte=0] == "-":
             print("please include the save filename", file=stderr)
             self.had_error = True
         else:

@@ -6,8 +6,10 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-tests = { cmd = "mojo arena.mojo && mojo mylogger.mojo && mojo ops.mojo && tokenchunks.mojo", cwd = "src" }
-#buildmain = { cmd = "mojo build -Xlinker -lm main.mojo", cwd = "src" }
+tests = { cmd = "mojo arena.mojo; mojo mylogger.mojo; mojo ops.mojo; tokenchunks.mojo", cwd = "src" }
+sanitize = "mojo build -g2 -O1 --sanitize=address -Xlinker -lm main.mojo && ./main"
+cdebug = { cmd = "mojo build -g2 -O1 --debug-info-language=C -Xlinker -lm main.mojo", cwd = "src" }
+buildmain = { cmd = "mojo build -Xlinker -lm main.mojo", cwd = "src" }
 
 [dependencies]
 mojo = ">=0.26.1.0.dev2025123005,<0.27"

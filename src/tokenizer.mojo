@@ -74,7 +74,7 @@ struct Pair(
         """Not the safest but should be fine."""
         # var had_space: Int = 1 if repr[0] == ' ' else 0
         var had_space = 0
-        var stripped_repr = repr[1 + had_space : -1]  # remove ()
+        var stripped_repr = repr[byte=1 + had_space : -1]  # remove ()
         var pair_strs = stripped_repr.split(Self.delimeter)
         try:
             var a = Int(pair_strs[0])
@@ -354,7 +354,7 @@ struct Tokenizer(Copyable, Movable):
                         len(lines),
                     )
                 # ex. encode line [(123, 456), (13, 37)]
-                var encode_pairs = lines[0][1:-1].split(",")
+                var encode_pairs = lines[0][byte=1:-1].split(",") # can treat as raw bytes
                 self.vocab_size = 256 + len(encode_pairs)
 
                 try:
@@ -363,7 +363,7 @@ struct Tokenizer(Copyable, Movable):
                         self.vocab_encode.append(pair)
                 except e:
                     print(e, file=stderr)
-                var spec_toks = lines[1][
+                var spec_toks = lines[1][byte=
                     1:-1
                 ]  # TODO: implement + dont forget vocab size
                 _ = spec_toks

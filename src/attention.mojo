@@ -797,6 +797,7 @@ struct LLM:
         if display:
             print("Final linear layer...")
         output = zeroTensorHeap[Self.output_layout]()
+        # FIXME: AVOID HEAP ALLOC
         weightAndBias(
             self.final_ln_output,
             self.output_weights.W,
@@ -806,6 +807,7 @@ struct LLM:
         printTensorSlice(output, "final output")
         _myTensorCopyFrom(src=output, dest=self.logits)
         # naiveSoftmax(output)
+        output.ptr.free()
 
     fn getNextTokenGreedy(self) -> Int:
         """

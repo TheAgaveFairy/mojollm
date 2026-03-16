@@ -42,7 +42,6 @@ fn printFieldsHeader[T: AnyType]() -> String:
     var result = ""
     comptime names = struct_field_names[T]()
 
-    # @parameter
     comptime for i in range(struct_field_count[T]()):
         result += materialize[names[i]]() + ","
     return result
@@ -55,11 +54,9 @@ fn printAllFields[T: AnyType](ref s: T) -> String:
 
     var result = ""
 
-    # @parameter
     comptime for i in range(struct_field_count[T]()):
         comptime TT = TTs[i]
-        var my_ref = __struct_field_ref(i, s)
-        # @parameter
+        ref my_ref = __struct_field_ref(i, s)
         comptime if conforms_to(TT, Writable & ImplicitlyCopyable):
             var w = trait_downcast[Writable & ImplicitlyCopyable](my_ref)
             result += "{},".format(w)
@@ -145,7 +142,7 @@ struct CSVLogger[T: LogRecord]:
             f.write(record.toCSV() + "\n")
 
 
-def main():
+def main() raises:
     var device = "gpu" if has_accelerator() else "cpu"
     var rec_train = LLMTrainRecord(
         device, 1, 3.14, 4.20, 1337.0, 9001, 60000, 0.01, ModelParams(), ftype
@@ -169,7 +166,7 @@ def main():
     suite^.run()
 
 
-def reflectionPrintTest():
+def reflectionPrintTest() raises:
     _ = """
         return "{},{},{},{},{},{},{},{},".format(
             self.device,

@@ -46,6 +46,7 @@ fn weightAndBias[
     try:
         # mine is within an order of magnitude, but might as well use a known BLAS
         matmul(output, input, weights, None)
+        #naiveDotProduct(input, weights, output)
     except e:
         print(e, file=stderr)
         naiveDotProduct(input, weights, output)
@@ -331,6 +332,7 @@ fn naiveAttention[
 
     try:
         matmul[transpose_b = True](scores, Q, K, None)
+        #naiveDotProduct(Q, KT, scores)
     except e:
         print(e, file=stderr)
         dotProductTiledVectorizedParallelized(Q, KT, scores)
@@ -352,10 +354,11 @@ fn naiveAttention[
     # modifies output in-place
     try:
         matmul(output, scores_probs, V, None)
+        #naiveDotProduct(scores_probs, V, output)
     except e:
         print(e, file=stderr)
         dotProductTiledVectorizedParallelized(scores_probs, V, output)
-    # naiveDotProduct(scores_probs, V, output)
+        # naiveDotProduct(scores_probs, V, output)
 
     # AT A HIGH LEVEL THIS PERFORMED:
     # var scores = Q @ K^T / sqrt(d_k)
@@ -686,7 +689,7 @@ fn feedForwardBackward[
 
     #weightAndBiasBackward(hidden, w1, b1, d_output, d_hidden, d_w1, d_b1)
     var d_hidden_pre_act = type_of(d_hidden).stack_allocation()
-    act_fn.backward(hidden, d_hidden, d_hidden_pre_act)
+    #act_fn.backward(hidden, d_hidden, d_hidden_pre_act)
     #weightAndBiasBackward(x, w0, b0, d_hidden_pre_act, d_x, d_w0, d_b0)
 
 fn naiveAttentionBackward[
@@ -735,14 +738,14 @@ fn naiveAttentionBackward[
 # TESTS
 
 
-def main():
+def main() raises:
     myBestBenchmarkTest()
     var suite = TestSuite()
     suite.test[matmulCorrectnessTest]()
     suite.test[powersOfTwoTest]()
     suite^.run()
 
-def myBestBenchmarkTest():
+def myBestBenchmarkTest() raises:
     """Test matrix multiplication against known values."""
     comptime M = 1 << 7
     comptime L = 1 << 5
@@ -794,10 +797,10 @@ def myBestBenchmarkTest():
     var ratio = Float64(mine_ns) / Float64(best_ns)
     print("best: {}\nmine: {}\n\t=> mine is {}x slower".format(best_ns, mine_ns, ratio))
 
-def attention():
-    assert_true(True) # compare to nn.attention
+def attention() raises:
+    assert_true(False) # compare to nn.attention
 
-def powersOfTwoTest():
+def powersOfTwoTest() raises:
     assert_true(not isPowerOfTwo(0), "0 is not a power of two")
     assert_true(isPowerOfTwo(1), "1 is a power of two")
     assert_true(not isPowerOfTwo(3), "3 is not a power of two")
