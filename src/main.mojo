@@ -97,6 +97,7 @@ fn main() raises:
     var args = TokenizerParser()
     if args.had_error:
         return
+    
     var logger = CSVLogger[LLMInferenceRecord]("test_delete.csv")#(logFileName())
     var device = "7600X 32GB"  # "RTX 3070" if has_accelerator() else "7600X"
     try:
@@ -116,7 +117,7 @@ fn main() raises:
             var start = perf_counter_ns()
             for i in range(times):
                 var tlc = 0 # tok_list_count
-                for tok_list in test_input[:]:
+                for tok_list in test_input[:20]:
                     var iter_start = perf_counter_ns()
                     comptime if display:
                         print("raw tokens:", tok_list)
@@ -143,8 +144,7 @@ fn main() raises:
                     # var tokens_as_tensor = LayoutTensor[
                     #var loss = crossEntropyLoss(output, test_input)
                     var iter_end = perf_counter_ns()
-                    #var iter_elapsed = Int(iter_end - iter_start)
-                    _ = """
+                    var iter_elapsed = Int(iter_end - iter_start)
                     var log_record = LLMInferenceRecord(
                         device,
                         0.69,
@@ -156,8 +156,8 @@ fn main() raises:
                         ftype,
                     )
                     logger.log(log_record)
-                    """
                     tlc += 1
+                    output.ptr.free()
             var end = perf_counter_ns()
             print("time", (end - start) // 1_000, "us for", times, "runs")
             # print("Capacity {} offset {}".format(llm.arena.capacity, llm.arena.offset))

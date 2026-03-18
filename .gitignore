@@ -2,11 +2,7 @@
 .pixi/*
 !.pixi/config.toml
 
-iterator.mojo
-lifetimes.mojo
-tokenizer
 testrun*
-bugreport*
 perf.data*
 out.perf
 out.folded
@@ -20,3 +16,4 @@ models/
 datasets/
 old/
 testdir/
+ignoreme/

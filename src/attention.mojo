@@ -807,7 +807,7 @@ struct LLM:
         printTensorSlice(output, "final output")
         _myTensorCopyFrom(src=output, dest=self.logits)
         # naiveSoftmax(output)
-        output.ptr.free()
+        # don't forget to call output.ptr.free()
 
     fn getNextTokenGreedy(self) -> Int:
         """

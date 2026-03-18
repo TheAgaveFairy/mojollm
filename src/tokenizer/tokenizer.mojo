@@ -30,7 +30,7 @@ from helpers import (
 )
 from attention import ftype, sftype, nelts
 from cliparser import TokenizerParser
-from tokenchunks import TokenChunks
+from .tokenchunks import TokenChunks
 
 
 @fieldwise_init
@@ -70,7 +70,7 @@ struct Pair(
 
     @staticmethod
     @always_inline("nodebug")
-    fn fromRepr(repr: StringSlice) raises -> Self:
+    def fromRepr(repr: StringSlice) raises -> Self:
         """Not the safest but should be fine."""
         # var had_space: Int = 1 if repr[0] == ' ' else 0
         var had_space = 0
@@ -83,23 +83,23 @@ struct Pair(
         except e:
             raise e^
 
-    fn __hash__[H: Hasher](self, mut hasher: H):
+    def __hash__[H: Hasher](self, mut hasher: H):
         var hash_me: Int64 = Int64(self.a) << 16 & Int64(self.b)
         hasher.update(hash_me)
 
-    fn __eq__(self, other: Self) -> Bool:
+    def __eq__(self, other: Self) -> Bool:
         return self.a == other.a and self.b == other.b
 
-    fn __repr__(self) -> String:
+    def __repr__(self) -> String:
         return "(" + String(self.a) + Self.delimeter + String(self.b) + ")"
 
-    fn write_to(self, mut writer: Some[Writer]):
+    def write_to(self, mut writer: Some[Writer]):
         writer.write(self.__repr__())
 
-    fn write_repr_to(self, mut writer: Some[Writer]):
+    def write_repr_to(self, mut writer: Some[Writer]):
         writer.write(self.__repr__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         return self.__repr__()
 
 
@@ -108,14 +108,14 @@ struct Tokenizer(Copyable, Movable):
     var vocab_size: Int
     var special_tokens: List[String]
 
-    fn __init__(out self, desired_vocab_size: Int):
+    def __init__(out self, desired_vocab_size: Int):
         var safe_desired_vocab_size = max(desired_vocab_size, 256)
         self.vocab_size = safe_desired_vocab_size  # we'll BPE up to this number
         self.vocab_encode = type_of(self.vocab_encode)()
         self.special_tokens = type_of(self.special_tokens)()
 
     @staticmethod
-    fn boundaryProtect(raw_ids: List[Int]) -> TokenChunks:
+    def boundaryProtect(raw_ids: List[Int]) -> TokenChunks:
         """
         Splits into chunks based on: contractions | words | punctuation | whitespace
         See below comment for Pattern approximation (raw strings not supported yet).
@@ -249,7 +249,7 @@ struct Tokenizer(Copyable, Movable):
         #    print(chunk)
         return chunks^
 
-    fn train(mut self, text: StringSlice, debug_display: Bool = False):
+    def train(mut self, text: StringSlice, debug_display: Bool = False):
         """
         Byte Pair Encoding. Text is assumed to be ASCII. Implements "regexp".
         """
@@ -285,7 +285,7 @@ struct Tokenizer(Copyable, Movable):
         if debug_display:
             print()
 
-    fn encode(self, text: StringSlice) -> List[Int]:
+    def encode(self, text: StringSlice) -> List[Int]:
         """Encodes some text into a List of our new token ids."""
         var ids = Self.stringToTokenList(text)
         for i, pair in enumerate(self.vocab_encode):
@@ -294,7 +294,7 @@ struct Tokenizer(Copyable, Movable):
 
         return ids^
 
-    fn decode(self, tokens: List[Int]) raises -> String:
+    def decode(self, tokens: List[Int]) raises -> String:
         """Decodes a list of token ids into the original text."""
         var unmerged = tokens.copy()
         for i in range(len(self.vocab_encode) - 1, -1, -1):  # LIFO
@@ -310,7 +310,7 @@ struct Tokenizer(Copyable, Movable):
 
         return String(unsafe_from_utf8=bytes)
 
-    fn exportVocab(self, filename: String):
+    def exportVocab(self, filename: String):
         """For use with Claude 4.5's tsx visualizer.html (which has bugs but that's ok).
         """
         print("Exporting vocab for visualizer:", filename)
@@ -324,7 +324,7 @@ struct Tokenizer(Copyable, Movable):
         except e:
             print(e, file=stderr)
 
-    fn save(self, filename: String) raises:
+    def save(self, filename: String) raises:
         """Saves as a plain text file, for now."""
         try:
             with open(filename, "w") as f:
@@ -336,7 +336,7 @@ struct Tokenizer(Copyable, Movable):
             raise e^
 
     @staticmethod
-    fn load(filename: String) raises -> Self:
+    def load(filename: String) raises -> Self:
         """Undoes the save and loads with some minor protections."""
         var self = Self(0)
         try:
@@ -372,7 +372,7 @@ struct Tokenizer(Copyable, Movable):
             raise e^
         return self^
 
-    fn decodeToken(self, token_id: Int) -> String:  # could return List[Byte]
+    def decodeToken(self, token_id: Int) -> String:  # could return List[Byte]
         """
         Might be faster than "decode" for a single token.
         """
@@ -395,7 +395,7 @@ struct Tokenizer(Copyable, Movable):
         var result = String(unsafe_from_utf8=[Byte(x) for x in internal])
         return result
 
-    fn _merge(
+    def _merge(
         self, text_tokens: List[Int], pair: Pair, token_id: Int
     ) -> List[Int]:
         """
@@ -420,7 +420,7 @@ struct Tokenizer(Copyable, Movable):
 
         return merged^
 
-    fn _unmerge(
+    def _unmerge(
         self, text_tokens: List[Int], pair: Pair, token_id: Int
     ) -> List[Int]:
         """Used for decode. Looks for compound tokens and replaces them with parts.
@@ -443,7 +443,7 @@ struct Tokenizer(Copyable, Movable):
 
     @staticmethod
     @always_inline("nodebug")
-    fn stringToTokenList(text: StringSlice) -> List[Int]:
+    def stringToTokenList(text: StringSlice) -> List[Int]:
         """Splits into bytes as Ints. UTF-8 or ASCII doesn't really matter."""
         var bytes = text.as_bytes()
         var n = len(bytes)
@@ -452,7 +452,7 @@ struct Tokenizer(Copyable, Movable):
             ids.append(Int(b))
         return ids^
 
-    fn _mergeChunks(
+    def _mergeChunks(
         self, read chunks: TokenChunks, pair: Pair, new_token_id: Int
     ) -> TokenChunks:
         """We take in a read-only list of token ids and allocate new fresh memory.
@@ -489,7 +489,7 @@ struct Tokenizer(Copyable, Movable):
 
         return merged^
 
-    fn _countPairsChunks(self, chunks: TokenChunks, s: Int) -> List[Int]:
+    def _countPairsChunks(self, chunks: TokenChunks, s: Int) -> List[Int]:
         """
         For the Shakespeare dataset, the max counted pair is seen 27643 times.
         We could probably save a lot of memory by using [U]Int16, need be on a
@@ -507,19 +507,19 @@ struct Tokenizer(Copyable, Movable):
             chunk_idx += 1
         return counts^
 
-    fn __copyinit__(out self, copy: Self):
+    def __copyinit__(out self, copy: Self):
         self.vocab_size = copy.vocab_size  # we'll BPE up to this number
         self.vocab_encode = copy.vocab_encode.copy()
         self.special_tokens = copy.special_tokens.copy()
 
-    fn __eq__(self, other: Self) -> Bool:
+    def __eq__(self, other: Self) -> Bool:
         var vs = self.vocab_size == other.vocab_size
         var pc = self.vocab_encode == other.vocab_encode
         var st = self.special_tokens == other.special_tokens
         return vs and pc and st
 
 
-fn main():
+def main():
     # tests
     var config = TokenizerParser()
     if config.had_error:
@@ -553,27 +553,7 @@ fn main():
     except e:
         print(e)
 
-
-fn saveLoadTest(tokenizer: Tokenizer) -> Bool:
-    var filename = "bpe_{}.tok".format(tokenizer.vocab_size)
-    try:
-        tokenizer.save(filename)
-        var tok2 = Tokenizer.load(filename)
-        return tokenizer == tok2
-    except e:
-        print(e, file=stderr)
-        return False
-
-
-fn decodeEncodeTest(tokenizer: Tokenizer, text: StringSlice) -> Bool:
-    try:
-        return text == tokenizer.decode(tokenizer.encode(text))
-    except e:
-        print(e, file=stderr)
-        return False
-
-
-fn compareVocabsTest(a: Tokenizer, b: Tokenizer) -> Bool:
+def compareVocabsTest(a: Tokenizer, b: Tokenizer) -> Bool:
     """
     Takes in two tokenizers to compare their vocabs.
     'a' is the reference implementation, and 'b' is checked against it.
@@ -590,7 +570,7 @@ fn compareVocabsTest(a: Tokenizer, b: Tokenizer) -> Bool:
 
 
 @deprecated("No other training methods implemented any longer.")
-fn compareTrainingTimesTest(
+def compareTrainingTimesTest(
     text: StringSlice, vocab_size: Int = 500, runs: Int = 5
 ) -> Float64:
     var tok_a = Tokenizer(vocab_size)
@@ -618,7 +598,7 @@ fn compareTrainingTimesTest(
     return accum / Float64(runs)
 
 
-fn showExample(tokenizer: Tokenizer, encoded: List[Int]) -> String:
+def showExample(tokenizer: Tokenizer, encoded: List[Int]) -> String:
     var result = ""
     comptime max_len = 250
     for tok in encoded[:max_len]:
