@@ -30,7 +30,7 @@ from helpers import (
 )
 from attention import ftype, sftype, nelts
 from cliparser import TokenizerParser
-from .tokenchunks import TokenChunks
+from tokenizer.tokenchunks import TokenChunks
 
 
 @fieldwise_init
@@ -518,40 +518,6 @@ struct Tokenizer(Copyable, Movable):
         var st = self.special_tokens == other.special_tokens
         return vs and pc and st
 
-
-def main():
-    # tests
-    var config = TokenizerParser()
-    if config.had_error:
-        return
-
-    try:
-        with open(config.input_filename, "r") as f:
-            var text = f.read()
-
-            var tokenizer = Tokenizer(
-                config.vocab_size
-            )  # ~280 is enough to display recursion
-            tokenizer.train(text, True)
-            # print("Decode encode test result:", decodeEncodeTest(tokenizer, text))
-            # print(showExample(tokenizer, tokenizer.encode(text[:500])))
-            tokenizer.save(config.save_name)
-
-            var vocab_filename = "models/vocab_{}.txt".format(config.vocab_size)
-            tokenizer.exportVocab(vocab_filename)
-
-            # var ratio = compareTrainingTimesTest(text, vocab_size = 1000, runs = 5)
-            _ = """
-            var tok2 = Tokenizer.load("bpe_25000.tok")
-            var test_ids = tok2.encode(text[:200])
-            for id in test_ids:
-                print(String(id), "\t", tok2.decodeToken(id))
-
-            with open(vocab_filename, "w") as v:
-                v.write(tokenizer.exportVocab())
-            """
-    except e:
-        print(e)
 
 def compareVocabsTest(a: Tokenizer, b: Tokenizer) -> Bool:
     """

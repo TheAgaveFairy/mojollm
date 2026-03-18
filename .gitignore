@@ -6,7 +6,7 @@ testrun*
 perf.data*
 out.perf
 out.folded
-flamegraph*
+flamegraph*.svg
 
 main
 
