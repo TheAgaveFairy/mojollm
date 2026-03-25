@@ -20,7 +20,7 @@ from std.hashlib.hasher import Hasher, default_hasher
 # from std.os.atomic import Atomic
 from std.collections import Set
 
-# from python import Python # for RegExp engines
+from std.python import Python # for RegExp engines
 
 from helpers import (
     showProgress,
@@ -113,6 +113,21 @@ struct Tokenizer(Copyable, Movable):
         self.vocab_size = safe_desired_vocab_size  # we'll BPE up to this number
         self.vocab_encode = type_of(self.vocab_encode)()
         self.special_tokens = type_of(self.special_tokens)()
+
+    @staticmethod
+    def regexPreProcess(input: StringSlice) raises -> TokenChunks:
+        var regex = Python.import_module("regex")
+        comptime gpt4_pattern = "'(?i:[sdmt]|ll|ve|re)|[^\\r\\n\\p{L}\\p{N}]?+\\p{L}+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]++[\\r\\n]*|\\s*[\\r\\n]|\\s+(?!\\S)|\\s+"
+        var pyre = Python.import_module("regex") # python `re` doesn't support \p{N} type unicode escapes
+        var compiled = pyre.compile(gpt4_pattern)
+        var pymatches = pyre.findall(compiled, input)
+    
+        var n = len(pymatches)
+        var chunks = TokenChunks(n)
+        for i in range(n):
+            var chunk = Self.stringToTokenList(String(pymatches[i]))
+            chunks.addChunk(chunk^)
+        return chunks^
 
     @staticmethod
     def boundaryProtect(raw_ids: List[Int]) -> TokenChunks:
@@ -249,14 +264,26 @@ struct Tokenizer(Copyable, Movable):
         #    print(chunk)
         return chunks^
 
-    def train(mut self, text: StringSlice, debug_display: Bool = False):
+    def train(mut self, text: StringSlice, *, regex: Bool = True, debug_display: Bool = False):
         """
-        Byte Pair Encoding. Text is assumed to be ASCII. Implements "regexp".
+        Byte Pair Encoding. Optional use of either a placeholding hand-parsing scheme
+        OR an actual Python regular expression engine (regex) until a Mojo-native
+        option comes available / the stdlib adopts the one I'm aware of.
         """
         if debug_display:
             print("Training with BPE to vocab size", self.vocab_size, "...")
-        var raw_ids: List[Int] = Self.stringToTokenList(text)
-        var ids: TokenChunks = Self.boundaryProtect(raw_ids)
+        
+        var ids: TokenChunks
+        if regex:
+            try:
+                ids = Self.regexPreProcess(text)
+            except e:
+                print(e)
+                var raw_ids: List[Int] = Self.stringToTokenList(text)
+                ids = Self.boundaryProtect(raw_ids)
+        else:
+            var raw_ids: List[Int] = Self.stringToTokenList(text)
+            ids = Self.boundaryProtect(raw_ids)
 
         var num_merges = self.vocab_size - 256
         for i in range(num_merges):

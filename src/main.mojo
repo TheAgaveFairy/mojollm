@@ -98,7 +98,7 @@ fn main() raises:
     if args.had_error:
         return
     
-    var logger = CSVLogger[LLMInferenceRecord]("test_delete.csv")#(logFileName())
+    var logger = CSVLogger[LLMInferenceRecord]("main_log_test_delete.csv")#(logFileName())
     var device = "7600X 32GB"  # "RTX 3070" if has_accelerator() else "7600X"
     try:
         with open(args.input_filename, "r") as f:

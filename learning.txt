@@ -31,3 +31,11 @@ The backwards pass has been still kinda rough; I'm still not super comfortable w
 Once I'm done with that, I just need to finish the GeLU backwards or just use ReLU, finish hooking up the Logger (did I finish that main struct?), and then run it and see if my loss goes down. From there, the sky is the limit!...
 
 ...batching, parallelizing things, different Optimizers, better ops, change to multi-head attention instead of single, FlashAttention, KV caching, RAG, GPU of course, training a big big version, wrapping it and hosting it, teaching people, writing a blog post (hence why this doc exists), benchmarking, trying other kinds of data besides text like MIDI or something could be fun, I could go on...
+
+Working on updating versions and organization. The tokenizer is a big and independent enough project that I'm turning it into a sub-package of sorts. The main training loop is getting moved out to a more obvious and visible location, and better tests are implemented.
+
+Pixi tasks are growing on me. I've also moved flamegraphing tools, etc, along with setting up tasks for address sanitization and valgrind builds. I'd accidentally malloc'd for my output of the forward pass and never freed those, whoops!
+
+Iterators got wrecked by some updates to how origins work, so TokenChunks got dumbed down. I need to ask @Nate in Discord at some point for updates.
+
+Transitioned to 26.3, nice. I finally caved and imported "regex" through Python to preprocess my text for my tokenizer. I tried using a community built engine, but it's not as full featured / a WIP so I'm waiting for that to get on an official channel. With this regex engine, I don't have to worry about Unicode. I might change my mind later. It's just been bothering me for now and regexp engines *will* come so I'd rather know how my program behaves with modern pre-processing. I don't want to build my own regex engine, and since it'll be in the stdlib I won't feel bad using one.

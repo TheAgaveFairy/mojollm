@@ -15,7 +15,7 @@ def main():
             var tokenizer = Tokenizer(
                 config.vocab_size
             )  # ~280 is enough to display recursion
-            tokenizer.train(text, True)
+            tokenizer.train(text, regex = True, debug_display = True)
             # print(showExample(tokenizer, tokenizer.encode(text[:500])))
             tokenizer.save(config.save_name)
 
