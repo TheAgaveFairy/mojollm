@@ -4,6 +4,7 @@ channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
 name = "mojollm"
 platforms = ["linux-64"]
 version = "0.1.0"
+preview = ["pixi-build"]
 
 [tasks]
 tests = { cmd = "mojo arena.mojo; mojo mylogger.mojo; mojo ops.mojo; mojo tokenizer/tokenchunks.mojo; mojo tokenizer/tokenizer_tests.mojo && rm temp.tok", cwd = "src" }
@@ -16,3 +17,4 @@ flamegraphs = { cmd = "./flamegraphing/graphmain.sh; ./flamegraphing/graphtokeni
 mojo = ">=0.26.1.0.dev2025123005,<0.27"
 max = ">=26.1.0.dev2025123005,<27"
 regex = ">=2026.2.28,<2027"
+EmberJson = { git = "https://github.com/bgreni/EmberJson.git" }
