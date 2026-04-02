@@ -3,7 +3,6 @@ from cliparser import TokenizerParser
 
 
 def main():
-    # tests
     var config = TokenizerParser()
     if config.had_error:
         return

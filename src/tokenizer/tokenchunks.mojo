@@ -25,30 +25,30 @@ struct TokenChunks(Copyable):  # , Iterable):
     comptime __copyinit__is_trivial = True
     comptime __moveinit__is_trivial = True
 
-    fn __init__(out self):
+    def __init__(out self):
         self.tokens = type_of(self.tokens)()
         self.boundaries = type_of(self.boundaries)()
 
-    fn __init__(out self, tokens: List[Int], boundaries: List[Int]):
+    def __init__(out self, tokens: List[Int], boundaries: List[Int]):
         self.tokens = tokens.copy()
         self.boundaries = boundaries.copy()
 
-    fn __init__(out self, tokens_capacity: Int):
+    def __init__(out self, tokens_capacity: Int):
         self.tokens = type_of(self.tokens)(capacity=tokens_capacity)
         self.boundaries = type_of(self.boundaries)()
 
-    fn __init__(out self, tokens_capacity: Int, num_chunks: Int):
+    def __init__(out self, tokens_capacity: Int, num_chunks: Int):
         self.tokens = type_of(self.tokens)(capacity=tokens_capacity)
         self.boundaries = type_of(self.boundaries)(capacity=num_chunks)
 
-    fn addChunk(mut self, chunk: List[Int]):
+    def addChunk(mut self, chunk: List[Int]):
         """Automatically calculates boundary and extends the tokens list."""
         var idx = len(self.tokens)
         for tok in chunk:
             self.tokens.append(tok)
         self.boundaries.append(idx)
 
-    fn get(self, chunk_idx: Int) -> Optional[Span[Int, origin_of(self.tokens)]]:
+    def get(self, chunk_idx: Int) -> Optional[Span[Int, origin_of(self.tokens)]]:
         """Returns an optional Span of the requested token_ids if the chunk_idx is valid.
         """
         var num_chunks = len(self.boundaries)

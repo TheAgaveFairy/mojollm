@@ -1,22 +1,22 @@
 trait Optimizer:
-    fn step(self):
+    def step(self):
         ...
 
-    fn zeroGrads(self):
+    def zeroGrads(self):
         ...
 
 
 struct SGD(Optimizer):
-    fn step(self):
+    def step(self):
         pass
 
-    fn zeroGrads(self):
+    def zeroGrads(self):
         pass
 
 
 struct ADAM(Optimizer):
-    fn step(self):
+    def step(self):
         pass
 
-    fn zeroGrads(self):
+    def zeroGrads(self):
         pass

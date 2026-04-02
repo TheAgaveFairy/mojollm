@@ -10,10 +10,12 @@ from std.reflection import (
 from std.testing import assert_equal, assert_true, TestSuite
 from std.subprocess import run as subprocessRun
 
+import emberjson # 3rd party dep, talks that it will be adopted by stdlib
+
 from attention import ModelParams, ftype, sftype
 
 
-fn getDateTime() -> String:
+def getDateTime() -> String:
     try:
         # var datetime = subprocessRun("TZ=\"America/New_York\" date +'%d %Y'")
         var datetime = subprocessRun("date")
@@ -37,7 +39,7 @@ fn getDateTime() -> String:
         return "DATE_FAILURE"
 
 
-fn printFieldsHeader[T: AnyType]() -> String:
+def printFieldsHeader[T: AnyType]() -> String:
     """Prints the field names of a struct as csv."""
     var result = ""
     comptime names = struct_field_names[T]()
@@ -47,7 +49,7 @@ fn printFieldsHeader[T: AnyType]() -> String:
     return result
 
 
-fn printAllFields[T: AnyType](ref s: T) -> String:
+def printAllFields[T: AnyType](ref s: T) -> String:
     """Takes in a reference to a live instance and prints its values as csv."""
     comptime TTs = struct_field_types[T]()
     comptime names = struct_field_names[T]()
@@ -67,10 +69,10 @@ fn printAllFields[T: AnyType](ref s: T) -> String:
 
 trait LogRecord:
     @staticmethod
-    fn header() -> String:
+    def header() -> String:
         ...
 
-    fn toCSV(self) -> String:
+    def toCSV(self) -> String:
         ...
 
 
@@ -82,7 +84,7 @@ struct LogFormat:
 
 
 @fieldwise_init
-struct LLMTrainRecord(LogRecord):
+struct LLMTrainRecord(LogRecord, emberjson.JsonSerializable):
     var device: String
     var step: Int  # nani
     var loss: sftype
@@ -95,12 +97,38 @@ struct LLMTrainRecord(LogRecord):
     var ftype: DType
 
     @staticmethod
-    fn header() -> String:
+    def header() -> String:
         return printFieldsHeader[Self]()
 
-    fn toCSV(self) -> String:
+    def toCSV(self) -> String:
         """Returns a csv string of the values. Header handled separately."""
         return printAllFields(self)
+
+    def write_json(self, mut writer: Some[emberjson.Serializer]):
+        var field_names_csv = printFieldsHeader[Self]()
+        var field_values_csv = printAllFields(self)
+        var field_names = field_names_csv.split(',')
+        var field_values = field_values_csv.split(',')
+
+        if len(field_names) != len(field_values):
+            writer.write("FAILURE TO WRITE AS JSON, LLMTrainRecord")
+            return
+
+        var n = len(field_names)
+        if not len(field_names[n - 1]): # empty field
+            _ = field_names.pop()
+            _ = field_values.pop()
+            n -= 1
+
+        var result = '{'
+        for i in range(n):
+            if not len(field_names[i]):
+                continue
+            result += '"' + String(field_names[i]) + '": ' + String(field_values[i])
+            if i != n - 1:
+                result += ", "
+        result += '}'
+        writer.write(result)
 
 
 @fieldwise_init
@@ -115,10 +143,10 @@ struct LLMInferenceRecord(LogRecord):
     var ftype: DType
 
     @staticmethod
-    fn header() -> String:
+    def header() -> String:
         return printFieldsHeader[Self]()
 
-    fn toCSV(self) -> String:
+    def toCSV(self) -> String:
         """Returns a csv string of the values. Header handled separately."""
         return printAllFields(self)
 
@@ -126,7 +154,7 @@ struct LLMInferenceRecord(LogRecord):
 struct CSVLogger[T: LogRecord]:
     var filename: Path  # or do i store a file and deinit it later
 
-    fn __init__(out self, filename: Variant[Path, String]) raises:
+    def __init__(out self, filename: Variant[Path, String]) raises:
         # could also overload constructor
         if filename.isa[Path]():
             self.filename = filename[Path]
@@ -137,12 +165,13 @@ struct CSVLogger[T: LogRecord]:
         with open(self.filename, "w") as f:
             f.write(self.T.header() + "\n")
 
-    fn log(self, record: self.T) raises:
+    def log(self, record: self.T) raises:
         with open(self.filename, "a") as f:
             f.write(record.toCSV() + "\n")
 
 
 def main() raises:
+    _ = """
     var device = "gpu" if has_accelerator() else "cpu"
     var rec_train = LLMTrainRecord(
         device, 1, 3.14, 4.20, 1337.0, 9001, 60000, 0.01, ModelParams(), ftype
@@ -160,11 +189,36 @@ def main() raises:
         csv_train_logger.log(rec_train)
     except e:
         print(e, file=stderr)
+    """
 
     var suite = TestSuite()
-    suite.test[reflectionPrintTest]()
+    #suite.test[reflectionPrintTest]()
+    #suite.test[testsNotWrittenYet]()
+    suite.test[serializeTest]()
     suite^.run()
 
+def testsNotWrittenYet() raises:
+    assert_true(False)
+
+def serializeTest() raises:
+    var device = "xPU"
+    var rec_train = LLMTrainRecord(
+        device, 1, 3.14, 4.20, 1337.0, 9001, 60000, 0.01, ModelParams(), ftype # ModelParams() goes before ftype
+    )
+    #var rec_infer = LLMInferenceRecord(
+    #    device, 5.0, 1337, "mojo", 0.05, 5, ModelParams(), ftype
+    #)
+    var train_json = emberjson.serialize(rec_train)
+    #var infer_json = emberjson.serialize(rec_infer)
+    print("TRAIN\n", train_json)
+    #print("INFER\n", infer_json)
+
+    print("try ModelParams()")
+    var mp = ModelParams()
+    var mp_s = emberjson.serialize(mp)
+    print(mp_s)
+    var mp_pp = emberjson.to_string[pretty=True](mp_s) # prints {"key":123}
+    print(mp_pp)
 
 def reflectionPrintTest() raises:
     _ = """

@@ -17,7 +17,7 @@ from arena import BumpArenaAllocator
 comptime std_std_deviation = 0.5
 
 
-fn _arenaTensorHelper[
+def _arenaTensorHelper[
     layout: Layout, d_type: DType = ftype
 ](
     mut arena: BumpArenaAllocator, *, random: Bool = False, std: Float64 = 0.02
@@ -42,14 +42,14 @@ fn _arenaTensorHelper[
 
 
 @always_inline("nodebug")
-fn _trans[layout: Layout]() -> Layout:
+def _trans[layout: Layout]() -> Layout:
     # debug_assert[assert_mode = "safe"](layout.shape[0].is_value(), "this was causing corruption")
     comptime m = layout.shape[0].value()
     comptime n = layout.shape[1].value()
     return Layout.row_major(n, m)
 
 
-fn _myTensorCopyFrom[
+def _myTensorCopyFrom[
     layout_a: Layout, layout_b: Layout, d_type: DType
 ](
     *,
@@ -81,7 +81,7 @@ fn _myTensorCopyFrom[
 
 
 @always_inline("nodebug")
-fn fillTensorRand[
+def fillTensorRand[
     layout: Layout
 ](
     x: LayoutTensor[ftype, layout, MutAnyOrigin],
@@ -92,7 +92,7 @@ fn fillTensorRand[
 
 
 @always_inline("nodebug")
-fn randTensorHeap[
+def randTensorHeap[
     layout: Layout
 ](std: Float64 = std_std_deviation) -> LayoutTensor[
     ftype, layout, MutAnyOrigin
@@ -105,7 +105,7 @@ fn randTensorHeap[
 
 
 @always_inline("nodebug")
-fn zeroTensorHeap[
+def zeroTensorHeap[
     layout: Layout
 ]() -> LayoutTensor[ftype, layout, MutAnyOrigin]:
     """Heap allocates and returns a LayoutTensor filled with zeros."""
@@ -115,14 +115,14 @@ fn zeroTensorHeap[
 
 
 @always_inline("nodebug")
-fn cleanFunctionName[func: fn() -> None]() -> String:
+def cleanFunctionName[func: def() -> None]() -> String:
     """Simple reflection."""
     var func_name = get_linkage_name[func]().split("(")[0]
     func_name = func_name.split("[")[0].split("::")[1]
     return func_name
 
 
-fn showProgress(progress: Int, total: Int):
+def showProgress(progress: Int, total: Int):
     """Simple progress bar. You'll want to print a newline when complete."""
     comptime bar_width = 50
 
@@ -142,7 +142,7 @@ fn showProgress(progress: Int, total: Int):
         print("]", round(ratio * 100, 1), "%", end="")
 
 
-fn systemInfo[ftype: DType]():
+def systemInfo[ftype: DType]():
     """Helps display SIMD capabilities on your machine."""
     comptime nelts = simd_width_of[ftype]()
     var output = """
@@ -155,7 +155,7 @@ Your machine has multi-core and SIMD support as:
     print(output)
 
 
-fn compareBuffers(
+def compareBuffers(
     a: UnsafePointer[sftype, _],  # infer origins
     b: UnsafePointer[sftype, _],
     length: Int,
@@ -181,7 +181,7 @@ struct ColorsEnum:
     comptime COLOR_PURPLE = "\x1b[35m"
 
 
-fn coloredString(
+def coloredString(
     str: String, color: String = ColorsEnum.COLOR_YELLOW
 ) -> String:
     return String(color + str + ColorsEnum.COLOR_RESET)

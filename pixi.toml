@@ -7,14 +7,15 @@ version = "0.1.0"
 preview = ["pixi-build"]
 
 [tasks]
-tests = { cmd = "mojo arena.mojo; mojo mylogger.mojo; mojo ops.mojo; mojo tokenizer/tokenchunks.mojo; mojo tokenizer/tokenizer_tests.mojo && rm temp.tok", cwd = "src" }
+tests = { cmd = "mojo arena.mojo; mojo mylogger.mojo; mojo ops.mojo; mojo tokenizer/tokenchunks.mojo; mojo tokenizer/tests.mojo && rm temp.tok", cwd = "src" }
 sanitize = "mojo build -g2 -O1 --sanitize=address -Xlinker -lm main.mojo && ./main"
 cdebug = { cmd = "mojo build -g2 -O1 --debug-info-language=C -Xlinker -lm main.mojo", cwd = "src" }
 buildmain = { cmd = "mojo build -Xlinker -lm main.mojo", cwd = "src" }
 flamegraphs = { cmd = "./flamegraphing/graphmain.sh; ./flamegraphing/graphtokenizer.sh;", cwd = "src" }
 
 [dependencies]
-mojo = ">=0.26.1.0.dev2025123005,<0.27"
+#mojo = ">=0.26.1.0.dev2025123005,<0.27"
+mojo = "==0.26.3.0.dev2026033105" # emberjson tied
 max = ">=26.1.0.dev2025123005,<27"
 regex = ">=2026.2.28,<2027"
 EmberJson = { git = "https://github.com/bgreni/EmberJson.git" }

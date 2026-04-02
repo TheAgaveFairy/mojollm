@@ -19,8 +19,8 @@ from tokenizer.tokenizer import *
 
 
 comptime desired_vocab_size = 260 # train 4 new tokens
-comptime train_filename = "tokenizer.mojo" # train on self, why not
-comptime temp_filename = "temp.tok"
+comptime train_filename = "./model.mojo" # train on self, why not
+comptime temp_filename = "./temp.tok"
 
 def main() raises:
     var suite = TestSuite()

@@ -17,13 +17,13 @@ from helpers import compareBuffers, fillTensorRand # testing
 trait ActivationFunction:
     @staticmethod
     @always_inline("nodebug")
-    fn forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
+    def forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
         """Operates in-place."""
         ...
 
     @staticmethod
     @always_inline("nodebug")
-    fn backward[
+    def backward[
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
@@ -36,9 +36,9 @@ trait ActivationFunction:
 struct ReLU(ActivationFunction):
     @staticmethod
     @always_inline("nodebug")
-    fn forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
+    def forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
             comptime zeros = SIMD[ftype, width](0)
             var mask = nums.gt(zeros)
@@ -49,7 +49,7 @@ struct ReLU(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn backward[
+    def backward[
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
@@ -61,7 +61,7 @@ struct ReLU(ActivationFunction):
         SIMD enhanced.
         """
 
-        fn closure[width: Int](i: Int) unified {mut}:
+        def closure[width: Int](i: Int) unified {mut}:
             comptime zeros = SIMD[ftype, width](0.0)
             var vec = d_input.ptr.load[width](i)
             var mask = vec.gt(zeros)
@@ -80,11 +80,11 @@ struct GELU(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
+    def forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
         comptime sqrt2 = sqrt(2.0)
 
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
             # var nums_cubed = nums * nums * nums
             # comptime scaling = SIMD[ftype, width](0.44715)
@@ -102,7 +102,7 @@ struct GELU(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn backward[
+    def backward[
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
@@ -125,7 +125,7 @@ struct GELU(ActivationFunction):
         comptime sqrttau = sqrt(tau)  # math.pi * 2.0
 
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
             comptime sqrt2_vec = SIMD[ftype, width](sqrt2)
             comptime sqrttau_vec = SIMD[ftype, width](sqrttau)
@@ -156,11 +156,11 @@ struct GELUTanh(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
+    def forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
         comptime term = sftype(sqrt(2.0 / pi))
 
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
             var nums_cubed = nums * nums * nums
             comptime scaling = SIMD[ftype, width](0.044715)
@@ -176,7 +176,7 @@ struct GELUTanh(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn backward[
+    def backward[
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
@@ -198,7 +198,7 @@ struct GELUTanh(ActivationFunction):
         comptime c = 0.044715
 
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
             comptime ks = SIMD[ftype, width](k)
             comptime cs = SIMD[ftype, width](c)
@@ -223,7 +223,7 @@ struct GELUFast(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn _sigmoid[stype: DType, width: Int](x: SIMD[stype, width]) -> SIMD[stype, width]:
+    def _sigmoid[stype: DType, width: Int](x: SIMD[stype, width]) -> SIMD[stype, width]:
         """SIMD Sigmoid that accepts any floating point type, not just ftype."""
         comptime assert stype.is_floating_point(), "_sigmoid requires floating points"
         comptime ones = SIMD[stype, width](1.0)
@@ -233,10 +233,10 @@ struct GELUFast(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
+    def forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
 
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
             comptime scaling = SIMD[ftype, width](1.702)
             var gelu = nums * Self._sigmoid(scaling * nums)
@@ -246,7 +246,7 @@ struct GELUFast(ActivationFunction):
 
     @staticmethod
     @always_inline("nodebug")
-    fn backward[
+    def backward[
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
@@ -262,7 +262,7 @@ struct GELUFast(ActivationFunction):
         comptime alpha = sftype(1.702)
 
         @parameter
-        fn vectorize_closure[width: Int](i: Int) unified {mut}:
+        def vectorize_closure[width: Int](i: Int) unified {mut}:
             comptime alphas = SIMD[ftype, width](alpha)
             comptime ones = SIMD[ftype, width](1.0)
             var nums = x.ptr.load[width=width](i)
@@ -310,7 +310,7 @@ def AnotherTest() raises:
         ftype, Layout.row_major(1), MutAnyOrigin
     ]
 
-    fn numerical_deriv(x: sftype, h: sftype = 1e-5) -> sftype:
+    def numerical_deriv(x: sftype, h: sftype = 1e-5) -> sftype:
         """LLM idea for testing."""
         var plus = ScalarTensor.stack_allocation().fill(x + h)
         var minus = ScalarTensor.stack_allocation().fill(x - h)

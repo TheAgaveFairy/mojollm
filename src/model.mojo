@@ -17,7 +17,7 @@ struct TrainableModel:
         ModelParams.seq_len, ModelParams.vocab_size
     )
 
-    fn __init__(out self):
+    def __init__(out self):
         var arena_size = (
             LLMWeights.sizeInBytes() + LLMGradients.sizeInBytes()
         )  # + optimizer state size
@@ -26,7 +26,7 @@ struct TrainableModel:
         self.grads = LLMGradients(arena)
         self.optimizer = SGD()
 
-    fn forward(
+    def forward(
         mut self,
         token_ids: InlineArray[Int, ModelParams.seq_len],
         output: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin],

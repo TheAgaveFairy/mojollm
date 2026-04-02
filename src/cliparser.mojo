@@ -29,7 +29,7 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
     var tag: String
     var had_error: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         var args = argv()
         # defaults
         self.vocab_size = 5000
@@ -104,7 +104,7 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
                 self.vocab_size, filename
             )
 
-    fn printBoundsError(mut self, text: String):
+    def printBoundsError(mut self, text: String):
         print(
             "Error in args. Please try again; probably caused by a flag at the"
             " end with no following value."
@@ -112,7 +112,7 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
         self.had_error = True
 
     @staticmethod
-    fn printHelp():
+    def printHelp():
         var help_str = (
             "Usage: ./tokenizer [OPTIONS]...\n"
             + "\t-i, --input-filename FILENAME\ta custom input file. default ="
@@ -124,28 +124,28 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
         )
         print(help_str)
 
-    fn _parseTag(mut self, tag: StringSlice):
+    def _parseTag(mut self, tag: StringSlice):
         if tag[byte=0] == "-":
             print("please include the input filename", file=stderr)
             self.had_error = True
         else:
             self.tag = String(tag)
 
-    fn _parseInputFilename(mut self, filename: StringSlice):
+    def _parseInputFilename(mut self, filename: StringSlice):
         if filename[byte=0] == "-":
             print("please include the input filename", file=stderr)
             self.had_error = True
         else:
             self.input_filename = String(filename)
 
-    fn _parseSaveName(mut self, filename: StringSlice):
+    def _parseSaveName(mut self, filename: StringSlice):
         if filename[byte=0] == "-":
             print("please include the save filename", file=stderr)
             self.had_error = True
         else:
             self.save_name = String(filename)
 
-    fn _parseVocabSize(mut self, vocab_size: StringSlice):
+    def _parseVocabSize(mut self, vocab_size: StringSlice):
         if vocab_size[byte=0] == "-":
             print("please include the save filename", file=stderr)
             self.had_error = True
@@ -156,7 +156,7 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
                 print(e, file=stderr)
                 self.had_error = True
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         return (
             "CLIParser:"
             + "\nVocab Size: "
@@ -169,13 +169,13 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
             + String(self.had_error)
         )
 
-    fn __repr__(self) -> String:
+    def __repr__(self) -> String:
         return self.__str__()
 
-    fn write_to(self, mut writer: Some[Writer]):
+    def write_to(self, mut writer: Some[Writer]):
         writer.write_string(self.__str__())
 
 
-fn main():
+def main():
     var parser = TokenizerParser()
     print(parser)

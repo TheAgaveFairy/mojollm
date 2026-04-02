@@ -20,6 +20,7 @@ from std.compile import compile_info
 import std.benchmark  # run, Unit.ms
 
 # from kernels.nn.softmax import softmax
+import emberjson
 
 from helpers import (
     showProgress,
@@ -54,7 +55,7 @@ comptime token_itype = DType.uint16  # needs to fit vocab_size (~50k for GPT-2)
 comptime display = True if is_defined["DISPLAY"]() else False
 
 
-fn _arenaTensorHelper[
+def _arenaTensorHelper[
     layout: Layout, d_type: DType
 ](
     mut arena: BumpArenaAllocator, *, random: Bool = False, std: Float64 = 0.02
@@ -87,7 +88,7 @@ struct ModelParams[  # [num_transformer_blocks: Int = 1 << 4,
     # d_k: Int = d_model,
     # d_v: Int = d_model,
     # d_ff: Int = d_model << 2
-](Copyable, Writable):
+](Copyable, Writable, emberjson.JsonSerializable):
     comptime num_transformer_blocks = 1 << 4
     comptime vocab_size = 1 << 13
 
@@ -101,7 +102,7 @@ struct ModelParams[  # [num_transformer_blocks: Int = 1 << 4,
     comptime d_ff = Self.d_model << 2  # d_model * 4 is common, apparently
 
     @staticmethod
-    fn __str__() -> String:
+    def __str__() -> String:
         var result = """
 ModelParams:
     num_transformer_blocks = {}
@@ -123,6 +124,21 @@ ModelParams:
         )
         return result
 
+    def write_json(self, mut writer: Some[emberjson.Serializer]):
+        #var result = t'{"num_transformer_blocks":{Self.num_transformer_blocks},"vocab_size":{Self.vocab_size},"max_batch_size":{Self.max_batch_size},"seq_len":{Self.seq_len},"d_model":{Self.d_model}}'
+        var result = '"num_transformer_blocks":{},"vocab_size":{},"max_batch_size":{},"seq_len":{},"d_model":{},"d_k":{},"d_v":{},"d_ff":{}'.format(
+        Self.num_transformer_blocks,
+            Self.vocab_size,
+            Self.max_batch_size,
+            Self.seq_len,
+            Self.d_model,
+            Self.d_k,
+            Self.d_v,
+            Self.d_ff
+        )
+        result = "{" + result + "}"
+        writer.write(result)
+        
 
 trait Weights:
     """Defaultable removed b/c arena."""
@@ -131,18 +147,18 @@ trait Weights:
     comptime __moveinit__is_trivial = True
 
     @staticmethod
-    fn initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64):
+    def initRandom(out self: Self, mut arena: BumpArenaAllocator, std: Float64):
         ...
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         ...
 
     # TODO: implement saving / loading
     # @staticmethod
-    # fn initFromFile(out self):
+    # def initFromFile(out self):
     #     pass
-    # fn saveToFile(self):
+    # def saveToFile(self):
     #    pass
 
 
@@ -168,7 +184,7 @@ struct EmbeddingWeights(Copyable, Weights):
     ]
 
     @always_inline("nodebug")
-    fn embedTokens(
+    def embedTokens(
         self,
         token_ids: InlineArray[
             Int, ModelParams.seq_len
@@ -197,7 +213,7 @@ struct EmbeddingWeights(Copyable, Weights):
             # output_slice += tok_emb
             # output_slice += pos_emb
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.token_embeddings = _arenaTensorHelper[
             Self.token_embeddings_layout, ftype
         ](arena)
@@ -212,7 +228,7 @@ struct EmbeddingWeights(Copyable, Weights):
         ](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         # FORWARD AND BACKWARDS
         result_in_sftype += comptime (Self.token_embeddings_layout.size()) * 2
@@ -222,7 +238,7 @@ struct EmbeddingWeights(Copyable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -253,7 +269,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
     var b_k_grad: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v_grad: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         # FORWARD
         # weights
         self.W_q = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -275,7 +291,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
         self.b_v_grad = _arenaTensorHelper[Self.b_v_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         # FORWARD
         result_in_sftype += comptime (Self.W_q_layout.size()) * 2
@@ -288,7 +304,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -317,7 +333,7 @@ struct FFWeights(Copyable, Movable, Weights):
     var b0_grad: LayoutTensor[ftype, Self.b0_layout, MutAnyOrigin]
     var b1_grad: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         # FORWARD
         self.w0 = _arenaTensorHelper[Self.w0_layout, ftype](arena)
         self.b0 = _arenaTensorHelper[Self.b0_layout, ftype](arena)
@@ -331,7 +347,7 @@ struct FFWeights(Copyable, Movable, Weights):
         self.b1_grad = _arenaTensorHelper[Self.b1_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         # FORWARD
         result_in_sftype += comptime (Self.w0_layout.size())
@@ -343,7 +359,7 @@ struct FFWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -362,7 +378,7 @@ struct LayerNormWeights(Copyable, Movable, Weights):
     var gamma_grad: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta_grad: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         # FORWARD
         self.gamma = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
         self.beta = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
@@ -372,7 +388,7 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         self.beta_grad = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         # FORWARD
         result_in_sftype += comptime (Self.gamma_layout.size()) * 2
@@ -381,7 +397,7 @@ struct LayerNormWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.1
     ):
         self = Self(arena)
@@ -402,7 +418,7 @@ struct OutputWeights(Copyable, Movable, Weights):
     var W_grad: LayoutTensor[ftype, Self.W_layout, MutAnyOrigin]
     var b_grad: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         # FORWARD
         self.W = _arenaTensorHelper[Self.W_layout, ftype](arena)
         self.b = _arenaTensorHelper[Self.b_layout, ftype](arena)
@@ -411,7 +427,7 @@ struct OutputWeights(Copyable, Movable, Weights):
         self.b_grad = _arenaTensorHelper[Self.b_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         # FORWARD
         result_in_sftype += comptime (Self.W_layout.size())
@@ -421,7 +437,7 @@ struct OutputWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -473,7 +489,7 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
     # BACKWARD
     # SHIT HERE
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.ln_attn = LayerNormWeights(arena)
         self.attn_weights = AttentionWeights(arena)
         self.ln_ffn = LayerNormWeights(arena)
@@ -505,7 +521,7 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
         self.ffn_out = _arenaTensorHelper[Self.X_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         var result_in_bytes = 0
 
@@ -537,7 +553,7 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
         return result_in_sftype * size_of[sftype]() + result_in_bytes
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -563,7 +579,7 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
         fillTensorRand(self.ffn_hidden, std)
         fillTensorRand(self.ffn_out, std)
 
-    fn forward[
+    def forward[
         layout: Layout
     ](
         mut self,
@@ -654,9 +670,9 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
             for j in range(output.shape[1]()):
                 output[i, j] += self.attn_out_post_residual[i, j]
 
-    fn backward(
+    def backward(
         mut self,
-        d_block_output: LayoutTensor[ftype, Self.X_layout],
+        d_block_output: LayoutTensor[ftype, Self.X_layout, _],
         d_block_input: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin],
     ):
         """d_block_input is the output buffer, don't let the names confuse you.
@@ -664,7 +680,7 @@ struct TransformerBlock(Copyable):  # decoder, should this take Weights trait?
         pass
 
 
-fn printTensorSlice[
+def printTensorSlice[
     layout: Layout
 ](tensor: LayoutTensor[ftype, layout, MutAnyOrigin], name: String):
     if not display:
@@ -699,7 +715,7 @@ struct LLM:
     ]
     var logits: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
-    fn __init__(out self):  # allocate buffers and pre-fill / load etc.
+    def __init__(out self):  # allocate buffers and pre-fill / load etc.
         var arena_size_in_bytes = Self.sizeInBytes()
         self.arena = BumpArenaAllocator(arena_size_in_bytes)
         self.arena.clear()  # memset_zeros the whole thing
@@ -725,7 +741,7 @@ struct LLM:
         self.logits = _arenaTensorHelper[Self.output_layout, ftype](self.arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         """
         For setting up our Arena.
         All of our model's LayoutTensors will go in this for CPU!
@@ -754,7 +770,7 @@ struct LLM:
             + result_in_bytes
         )
 
-    fn forward(
+    def forward(
         mut self,
         token_ids: InlineArray[
             Int, ModelParams.seq_len
@@ -809,7 +825,7 @@ struct LLM:
         # naiveSoftmax(output)
         # don't forget to call output.ptr.free()
 
-    fn getNextTokenGreedy(self) -> Int:
+    def getNextTokenGreedy(self) -> Int:
         """
         Call *after* a forward pass. This is not an end-to-end prediction path,
         just an abstraction so we can do temperature based, top-K, etc. types
@@ -826,6 +842,6 @@ struct LLM:
                 max_idx = i
         return max_idx
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         print(coloredString("LLM __del__()", ColorsEnum.COLOR_PURPLE))
         self.arena.buffer.free()  # don't clear(), free() and delete the arena!

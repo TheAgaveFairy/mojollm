@@ -22,7 +22,7 @@ from ops import crossEntropyLoss
 from mylogger import LLMInferenceRecord, LLMTrainRecord, CSVLogger, getDateTime
 
 
-fn prettyPrintBytes(bytes: Int) -> String:
+def prettyPrintBytes(bytes: Int) -> String:
     var fbytes = Float64(bytes)
     if fbytes < 1024:
         return "{}B".format(bytes)
@@ -34,7 +34,7 @@ fn prettyPrintBytes(bytes: Int) -> String:
         return "{}GB".format(round(fbytes / (1024 * 1024 * 1024), 4))
 
 
-fn printIntSpan[o: Origin](tokens: Span[Int, o]):
+def printIntSpan[o: Origin](tokens: Span[Int, o]):
     var num_to_print = min(len(tokens), 100)
     for i in range(num_to_print):
         print(tokens[i], end=", ")
@@ -45,7 +45,7 @@ comptime toks_arr = InlineArray[Int, ModelParams.seq_len]
 
 
 # TODO: move to tokenizer
-fn splitInput(toks: List[Int]) -> List[toks_arr]:
+def splitInput(toks: List[Int]) -> List[toks_arr]:
     """Left pads and splits into seq_len chunks! No special tokens handled here.
     """
     # TODO: handle special tokens?
@@ -72,7 +72,7 @@ fn splitInput(toks: List[Int]) -> List[toks_arr]:
     return output^
 
 
-fn tempPrintOutput[
+def tempPrintOutput[
     layout: Layout
 ](output: LayoutTensor[ftype, layout, MutAnyOrigin]):
     comptime last_row = ModelParams.seq_len - 1
@@ -84,13 +84,13 @@ fn tempPrintOutput[
     print()
 
 
-fn logFileName(mode: String = "test") -> Path:
+def logFileName(mode: String = "test") -> Path:
     var temp_log_name = Path("./logs/")
     temp_log_name /= getDateTime() + "_" + mode + ".csv"
     return temp_log_name
 
 
-fn main() raises:
+def main() raises:
     seed(42)
     systemInfo[ftype]()
 

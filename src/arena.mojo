@@ -28,15 +28,15 @@ from std.os import abort
 
 
 trait Allocator:
-    fn alloc[
+    def alloc[
         T: AnyType
     ](mut self, count: Int) -> UnsafePointer[T, MutAnyOrigin]:
         ...
 
-    fn reset(mut self):
+    def reset(mut self):
         ...
 
-    fn clear(mut self):
+    def clear(mut self):
         ...
 
 
@@ -51,7 +51,7 @@ struct BumpArenaAllocator(Allocator, Copyable, ImplicitlyCopyable):
     var capacity: Int
     var offset: Int
 
-    fn __init__(
+    def __init__(
         out self, capacity_bytes: Int, extra_space_factor: Float64 = 0.0
     ):
         # if extra_space_factor < 0.0:
@@ -63,13 +63,13 @@ struct BumpArenaAllocator(Allocator, Copyable, ImplicitlyCopyable):
         self.capacity = capacity_bytes
         self.offset = 0
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         # TODO: I think we can reinstate the self-clearing
         # print("BumpArenaAllocator __del__()")
         pass
         # self.buffer.free()
 
-    fn alloc[
+    def alloc[
         T: AnyType
     ](mut self, count: Int = 1) -> UnsafePointer[T, MutAnyOrigin]:
         """Allocate space for `count` items of type T."""
@@ -89,12 +89,12 @@ struct BumpArenaAllocator(Allocator, Copyable, ImplicitlyCopyable):
         # print("allocating", String(count), get_type_name[T](), "begin", Int(ptr), "->", Int(ptr + count))
         return ptr
 
-    fn reset(mut self):
+    def reset(mut self):
         """Free all allocations at once by resetting the offset."""
         self.offset = 0
         # Memory is still there, just reusable
 
-    fn clear(mut self):
+    def clear(mut self):
         """Reset and zero out memory."""
         memset_zero(self.buffer, self.capacity)
         self.offset = 0
@@ -122,7 +122,7 @@ def main() raises:
     suite^.run()
 
 
-fn printFields[T: AnyType]():
+def printFields[T: AnyType]():
     """Testing new reflection features."""
     print(get_type_name[T](), "has fields:")
     comptime f_types = struct_field_types[T]()
@@ -133,7 +133,7 @@ fn printFields[T: AnyType]():
         print("\t", materialize[f_names[i]](), ":", get_type_name[f_types[i]]())
 
 
-fn printTypeInfo[T: DType]():
+def printTypeInfo[T: DType]():
     """Prints type name, size, and alignment."""
     comptime thing = "{}:\n\tsize: {}, align {}".format(
         T, size_of[Scalar[T]](), align_of[Scalar[T]]()
@@ -206,24 +206,24 @@ struct TestWeights(Weights):
     comptime layout = Layout.row_major(7)
     var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
 
-    fn __init__(out self, arena: BumpArenaAllocator):
+    def __init__(out self, arena: BumpArenaAllocator):
         self.arena = arena
         self.a = type_of(self.a)(
             self.arena.alloc[sftype](comptime (self.layout.size()))
         ).fill(3.0)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         return comptime (Self.layout.size()) * size_of[ftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
         _ = self.a.fill(1.0)
 
-    fn freeMemory(mut self):
+    def freeMemory(mut self):
         self.a.ptr.free()
 
 
@@ -234,7 +234,7 @@ struct TestContainer:
     var a: LayoutTensor[ftype, Self.layout, MutAnyOrigin]
     var sub_weights: TestWeights
 
-    fn __init__(out self):
+    def __init__(out self):
         self.arena = type_of(self.arena)(
             self.sizeInBytes() + TestWeights.sizeInBytes()
         )
@@ -244,10 +244,10 @@ struct TestContainer:
         self.sub_weights = TestWeights.initRandom(self.arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         return comptime (Self.layout.size()) * size_of[sftype]()
 
-    fn __del__(deinit self):
+    def __del__(deinit self):
         pass
         # self.a.ptr.free()
         # self.sub_weights.a.ptr.free()

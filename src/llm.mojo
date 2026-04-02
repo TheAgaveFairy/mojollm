@@ -78,7 +78,7 @@ struct EmbeddingWeights(Copyable, Weights):
         ftype, Self.position_embeddings_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.token_embeddings = _arenaTensorHelper[
             Self.token_embeddings_layout, ftype
         ](arena)
@@ -87,14 +87,14 @@ struct EmbeddingWeights(Copyable, Weights):
         ](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.token_embeddings_layout.size())
         result_in_sftype += comptime (Self.position_embeddings_layout.size())
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -102,7 +102,7 @@ struct EmbeddingWeights(Copyable, Weights):
         fillTensorRand(self.position_embeddings, std)
 
     @always_inline("nodebug")
-    fn embedTokens(
+    def embedTokens(
         self,
         token_ids: InlineArray[Int, ModelParams.seq_len],
         mut X: LayoutTensor[
@@ -147,7 +147,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
     var b_k: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         # weights
         self.W_q = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
         self.W_k = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -158,7 +158,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
         self.b_v = _arenaTensorHelper[Self.b_v_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.W_q_layout.size()) * 2
         result_in_sftype += comptime (Self.W_v_layout.size())
@@ -168,7 +168,7 @@ struct AttentionWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -191,14 +191,14 @@ struct FFNWeights(Copyable, Movable, Weights):
     var b0: LayoutTensor[ftype, Self.b0_layout, MutAnyOrigin]
     var b1: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.w0 = _arenaTensorHelper[Self.w0_layout, ftype](arena)
         self.b0 = _arenaTensorHelper[Self.b0_layout, ftype](arena)
         self.w1 = _arenaTensorHelper[Self.w1_layout, ftype](arena)
         self.b1 = _arenaTensorHelper[Self.b1_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.w0_layout.size())
         result_in_sftype += comptime (Self.b0_layout.size())
@@ -207,7 +207,7 @@ struct FFNWeights(Copyable, Movable, Weights):
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -225,18 +225,18 @@ struct LayerNormWeights(Copyable, Movable, Weights):
     var gamma: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta: LayoutTensor[ftype, Self.beta_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.gamma = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
         self.beta = _arenaTensorHelper[Self.gamma_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.gamma_layout.size()) * 2
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -255,19 +255,19 @@ struct OutputWeights(Copyable, Movable, Weights):
     var W: LayoutTensor[ftype, Self.W_layout, MutAnyOrigin]
     var b: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.W = _arenaTensorHelper[Self.W_layout, ftype](arena)
         self.b = _arenaTensorHelper[Self.b_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.W_layout.size())
         result_in_sftype += comptime (Self.b_layout.size())
         return result_in_sftype * size_of[sftype]()
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -283,14 +283,14 @@ struct TransformerBlockWeights(Copyable):
     var ln_ffn: LayerNormWeights
     var ffn_weights: FFNWeights
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.ln_attn = LayerNormWeights(arena)
         self.attn_weights = AttentionWeights(arena)
         self.ln_ffn = LayerNormWeights(arena)
         self.ffn_weights = FFNWeights(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_bytes = 0
 
         result_in_bytes += LayerNormWeights.sizeInBytes()
@@ -300,7 +300,7 @@ struct TransformerBlockWeights(Copyable):
         return result_in_bytes
 
     @staticmethod
-    fn initRandom(
+    def initRandom(
         out self: Self, mut arena: BumpArenaAllocator, std: Float64 = 0.02
     ):
         self = Self(arena)
@@ -322,7 +322,7 @@ struct LLMWeights(Copyable):
     var ln_final: LayerNormWeights
     var output: OutputWeights
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         var arena_size_in_bytes = Self.sizeInBytes()
         # self.arena = BumpArenaAllocator(arena_size_in_bytes)
         # self.arena.clear()  # memset_zeros the whole thing
@@ -337,7 +337,7 @@ struct LLMWeights(Copyable):
         self.output = OutputWeights.initRandom(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_bytes = 0
 
         result_in_bytes += EmbeddingWeights.sizeInBytes()
@@ -349,10 +349,10 @@ struct LLMWeights(Copyable):
         result_in_bytes += OutputWeights.sizeInBytes()
         return result_in_bytes
 
-    fn saveToFile(self, path: String):
+    def saveToFile(self, path: String):
         pass
 
-    fn loadFromFile(self, path: String) -> String:
+    def loadFromFile(self, path: String) -> String:
         pass
 
 
@@ -368,13 +368,13 @@ struct EmbeddingActivations(Copyable):
         ftype, TransformerBlockActivations.X_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.embedded_X = _arenaTensorHelper[
             TransformerBlockActivations.X_layout, ftype
         ](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (
             TransformerBlockActivations.X_layout.size()
@@ -414,7 +414,7 @@ struct AttentionActivations(Copyable):
         ftype, Self.attn_out_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.X_post_ln_attn = _arenaTensorHelper[Self.X_layout](arena)
         self.Q = _arenaTensorHelper[Self.Q_layout](arena)
         self.K = _arenaTensorHelper[Self.K_layout](arena)
@@ -430,7 +430,7 @@ struct AttentionActivations(Copyable):
         )
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.Q_layout.size())
         result_in_sftype += comptime (Self.K_layout.size())
@@ -460,13 +460,13 @@ struct FFNActivations(Copyable):
     var ffn_hidden: LayoutTensor[ftype, Self.hidden_layout, MutAnyOrigin]
     var ffn_out: LayoutTensor[ftype, Self.output_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.ffn_input = _arenaTensorHelper[Self.input_layout](arena)
         self.ffn_hidden = _arenaTensorHelper[Self.hidden_layout](arena)
         self.ffn_out = _arenaTensorHelper[Self.output_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.input_layout.size())
         result_in_sftype += comptime (Self.hidden_layout.size())
@@ -486,13 +486,13 @@ struct TransformerBlockActivations(Copyable):
     var attn: AttentionActivations
     var ffn: FFNActivations
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.X_pre_ln_attn = _arenaTensorHelper[Self.X_layout](arena)
         self.attn = AttentionActivations(arena)
         self.ffn = FFNActivations(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         var result_in_bytes = 0
         result_in_sftype += comptime (Self.X_layout.size())
@@ -525,7 +525,7 @@ struct LLMActivations(Copyable):
     ]
     var logits: LayoutTensor[ftype, Self.logits_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.input_token_ids = _arenaTensorHelper[
             Self.input_layout, token_itype
         ](
@@ -542,7 +542,7 @@ struct LLMActivations(Copyable):
         self.logits = _arenaTensorHelper[Self.logits_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         var result_in_bytes = 0
         result_in_sftype += comptime (Self.input_layout.size())
@@ -583,7 +583,7 @@ struct EmbeddingGradients(Copyable):
         ftype, Self.position_embeddings_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.token_embeddings_grad = _arenaTensorHelper[
             Self.token_embeddings_layout
         ](arena)
@@ -592,13 +592,13 @@ struct EmbeddingGradients(Copyable):
         ](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.token_embeddings_layout.size())
         result_in_sftype += comptime (Self.position_embeddings_layout.size())
         return result_in_sftype * size_of[sftype]()
 
-    fn zero(mut self):
+    def zero(mut self):
         memset_zero(
             self.token_embeddings_grad.ptr,
             comptime (Self.token_embeddings_layout.size()),
@@ -624,7 +624,7 @@ struct AttentionGradients(Copyable):
     var b_k_grad: LayoutTensor[ftype, Self.b_q_layout, MutAnyOrigin]
     var b_v_grad: LayoutTensor[ftype, Self.b_v_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         # weights
         self.W_q_grad = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
         self.W_k_grad = _arenaTensorHelper[Self.W_q_layout, ftype](arena)
@@ -635,7 +635,7 @@ struct AttentionGradients(Copyable):
         self.b_v_grad = _arenaTensorHelper[Self.b_v_layout, ftype](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.W_q_layout.size()) * 2
         result_in_sftype += comptime (Self.W_v_layout.size())
@@ -644,7 +644,7 @@ struct AttentionGradients(Copyable):
 
         return result_in_sftype * size_of[sftype]()
 
-    fn zero(mut self):
+    def zero(mut self):
         memset_zero(self.W_q_grad.ptr, comptime (Self.W_q_layout.size()))
         memset_zero(self.W_k_grad.ptr, comptime (Self.W_q_layout.size()))
         memset_zero(self.W_v_grad.ptr, comptime (Self.W_v_layout.size()))
@@ -667,14 +667,14 @@ struct FFNGradients(Copyable):
     var b0_grad: LayoutTensor[ftype, Self.b0_layout, MutAnyOrigin]
     var b1_grad: LayoutTensor[ftype, Self.b1_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.w0_grad = _arenaTensorHelper[Self.w0_layout](arena)
         self.w1_grad = _arenaTensorHelper[Self.w1_layout](arena)
         self.b0_grad = _arenaTensorHelper[Self.b0_layout](arena)
         self.b1_grad = _arenaTensorHelper[Self.b1_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.w0_layout.size())
         result_in_sftype += comptime (Self.w1_layout.size())
@@ -682,7 +682,7 @@ struct FFNGradients(Copyable):
         result_in_sftype += comptime (Self.b1_layout.size())
         return result_in_sftype * size_of[sftype]()
 
-    fn zero(mut self):
+    def zero(mut self):
         memset_zero(self.w0_grad.ptr, comptime (Self.w0_layout.size()))
         memset_zero(self.w1_grad.ptr, comptime (Self.w1_layout.size()))
         memset_zero(self.b0_grad.ptr, comptime (Self.b0_layout.size()))
@@ -698,18 +698,18 @@ struct LayerNormGradients(Copyable):
     var gamma_grad: LayoutTensor[ftype, Self.gamma_layout, MutAnyOrigin]
     var beta_grad: LayoutTensor[ftype, Self.beta_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.gamma_grad = _arenaTensorHelper[Self.gamma_layout](arena)
         self.beta_grad = _arenaTensorHelper[Self.beta_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.gamma_layout.size())
         result_in_sftype += comptime (Self.beta_layout.size())
         return result_in_sftype * size_of[sftype]()
 
-    fn zero(mut self):
+    def zero(mut self):
         memset_zero(self.gamma_grad.ptr, comptime (Self.gamma_layout.size()))
         memset_zero(self.beta_grad.ptr, comptime (Self.beta_layout.size()))
 
@@ -725,18 +725,18 @@ struct OutputGradients(Copyable):
     var W_grad: LayoutTensor[ftype, Self.W_layout, MutAnyOrigin]
     var b_grad: LayoutTensor[ftype, Self.b_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.W_grad = _arenaTensorHelper[Self.W_layout](arena)
         self.b_grad = _arenaTensorHelper[Self.b_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.W_layout.size())
         result_in_sftype += comptime (Self.b_layout.size())
         return result_in_sftype * size_of[sftype]()
 
-    fn zero(mut self):
+    def zero(mut self):
         memset_zero(self.W_grad.ptr, comptime (Self.W_layout.size()))
         memset_zero(self.b_grad.ptr, comptime (Self.b_layout.size()))
 
@@ -749,14 +749,14 @@ struct TransformerBlockGradients(Copyable):
     var ln_ffn: LayerNormGradients
     var ffn: FFNGradients
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.ln_attn = LayerNormGradients(arena)
         self.attn = AttentionGradients(arena)
         self.ln_ffn = LayerNormGradients(arena)
         self.ffn = FFNGradients(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_bytes = 0
 
         result_in_bytes += LayerNormGradients.sizeInBytes()
@@ -765,7 +765,7 @@ struct TransformerBlockGradients(Copyable):
         result_in_bytes += FFNGradients.sizeInBytes()
         return result_in_bytes
 
-    fn zero(mut self):
+    def zero(mut self):
         self.ln_attn.zero()
         self.attn.zero()
         self.ln_ffn.zero()
@@ -784,7 +784,7 @@ struct LLMGradients(Copyable):
     var ln_final: LayerNormGradients
     var output: OutputGradients
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.embedding = EmbeddingGradients(arena)
         self.blocks = type_of(self.blocks)(
             fill=TransformerBlockGradients(arena),
@@ -793,7 +793,7 @@ struct LLMGradients(Copyable):
         self.output = OutputGradients(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_bytes = 0
         result_in_bytes += EmbeddingGradients.sizeInBytes()
         result_in_bytes += (
@@ -804,7 +804,7 @@ struct LLMGradients(Copyable):
         result_in_bytes += OutputGradients.sizeInBytes()
         return result_in_bytes
 
-    fn zero(mut self):
+    def zero(mut self):
         self.embedding.zero()
         comptime for i in range(ModelParams.num_transformer_blocks):
             self.blocks[i].zero()
@@ -841,7 +841,7 @@ struct AttentionBackwardBuffers(Copyable):
     var d_attn_probs: LayoutTensor[ftype, Self.attn_scores_layout, MutAnyOrigin]
     var d_X_post_ln_attn: LayoutTensor[ftype, Self.X_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.d_Q = _arenaTensorHelper[Self.Q_layout](arena)
         self.d_K = _arenaTensorHelper[Self.Q_layout](arena)
         self.d_V = _arenaTensorHelper[Self.Q_layout](arena)
@@ -851,7 +851,7 @@ struct AttentionBackwardBuffers(Copyable):
         self.d_X_post_ln_attn = _arenaTensorHelper[Self.X_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.Q_layout.size()) * 3
         result_in_sftype += comptime (Self.attn_scores_layout.size()) * 2
@@ -872,12 +872,12 @@ struct FFNBackwardBuffers(Copyable):
     var d_ffn_input: LayoutTensor[ftype, Self.input_layout, MutAnyOrigin]
     var d_ffn_hidden: LayoutTensor[ftype, Self.hidden_layout, MutAnyOrigin]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.d_ffn_input = _arenaTensorHelper[Self.input_layout](arena)
         self.d_ffn_hidden = _arenaTensorHelper[Self.hidden_layout](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_sftype = 0
         result_in_sftype += comptime (Self.input_layout.size())
         result_in_sftype += comptime (Self.hidden_layout.size())
@@ -890,12 +890,12 @@ struct TransformerBlockBackwardBuffers(Copyable):
     var attn: AttentionBackwardBuffers
     var ffn: FFNBackwardBuffers
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.attn = AttentionBackwardBuffers(arena)
         self.ffn = FFNBackwardBuffers(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_bytes = 0
         result_in_bytes += AttentionBackwardBuffers.sizeInBytes()
         result_in_bytes += FFNBackwardBuffers.sizeInBytes()
@@ -912,7 +912,7 @@ struct LLMBackwardBuffers(Copyable):
         ftype, TransformerBlockActivations.X_layout, MutAnyOrigin
     ]
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.blocks = type_of(self.blocks)(
             fill=TransformerBlockBackwardBuffers(arena),
         )
@@ -921,7 +921,7 @@ struct LLMBackwardBuffers(Copyable):
         ](arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         var result_in_bytes = 0
         var result_in_sftype = 0
         result_in_bytes += (
@@ -948,16 +948,16 @@ struct AdamOptimizerState:
 
     var t: Int  # timestep for bias correction
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.momentum = LLMGradients(arena)
         self.velocity = LLMGradients(arena)
         self.t = 0
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         return 2 * LLMGradients.sizeInBytes()  # lazy today
 
-    fn step(
+    def step(
         mut self,
         mut weights: LLMWeights,
         gradients: LLMGradients,
@@ -974,14 +974,14 @@ struct SGDOptimizerState:
 
     var velocity: LLMGradients  # Only need one copy for momentum
 
-    fn __init__(out self, mut arena: BumpArenaAllocator):
+    def __init__(out self, mut arena: BumpArenaAllocator):
         self.velocity = LLMGradients(arena)
 
     @staticmethod
-    fn sizeInBytes() -> Int:
+    def sizeInBytes() -> Int:
         return LLMGradients.sizeInBytes()
 
-    fn step(
+    def step(
         mut self,
         mut weights: LLMWeights,
         gradients: LLMGradients,
@@ -999,7 +999,7 @@ struct SGDOptimizerState:
 def main():
     return
     _ = """
-    fn inference_example():
+    def inference_example():
         # Load weights once
         var weights = LLMWeights()
         weights.loadFromFile("model.weights")
@@ -1018,7 +1018,7 @@ def main():
             var next_token = greedy_decode(batch_activations[i].logits)
 
 
-    fn training_example():
+    def training_example():
         # Initialize everything
         var weights = LLMWeights()  # or load from checkpoint
         var gradients = LLMGradients()
@@ -1049,7 +1049,7 @@ def main():
             optimizer.step(weights, gradients, lr=0.001)
 
 
-    fn memory_efficient_inference():
+    def memory_efficient_inference():
         var weights = LLMWeights()
         var activations = LLMActivations()
 

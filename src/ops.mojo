@@ -1,4 +1,5 @@
 from layout import Layout, LayoutTensor
+from layout.tile_tensor import lt_to_tt
 from std.math import sqrt, exp, log, ceildiv
 from std.random import random_float64, random_si64, randint, randn, rand, seed
 from std.sys.info import (
@@ -24,7 +25,7 @@ from activation_fn import ActivationFunction, ReLU, GELU, GELUTanh, GELUFast
 from helpers import compareBuffers, fillTensorRand
 
 
-fn weightAndBias[
+def weightAndBias[
     layout_input: Layout,
     layout_weights: Layout,
     layout_bias: Layout,
@@ -45,7 +46,7 @@ fn weightAndBias[
     # naiveDotProduct(input, weights, output)
     try:
         # mine is within an order of magnitude, but might as well use a known BLAS
-        matmul(output, input, weights, None)
+        matmul(lt_to_tt(output), lt_to_tt(input), lt_to_tt(weights), None)
         #naiveDotProduct(input, weights, output)
     except e:
         print(e, file=stderr)
@@ -58,7 +59,7 @@ fn weightAndBias[
             output[i, j] += biases[j]
 
 
-fn dotProductTiledVectorizedParallelized[
+def dotProductTiledVectorizedParallelized[
     layout_a: Layout, layout_b: Layout, layout_c: Layout, tile_size: Int = 32
 ](
     a: LayoutTensor[ftype, layout_a, _],
@@ -88,7 +89,7 @@ fn dotProductTiledVectorizedParallelized[
     # TODO : shape asserts
 
     @parameter
-    fn parallel_closure(tid: Int):  # thread id, range(0, num_output_tiles)
+    def parallel_closure(tid: Int):  # thread id, range(0, num_output_tiles)
         var ci = tid // num_tiles_n
         var cj = tid % num_tiles_n
 
@@ -109,7 +110,7 @@ fn dotProductTiledVectorizedParallelized[
                     # var ti = tii
                     # var tj = tjj
                     @parameter
-                    fn dot_product[
+                    def dot_product[
                         width: Int
                     ](tk: Int) unified {
                         read ti, read tj, mut a_tile, mut bT_tile, mut c_tile
@@ -127,7 +128,7 @@ fn dotProductTiledVectorizedParallelized[
 
 
 @always_inline("nodebug")
-fn naiveDotProduct[
+def naiveDotProduct[
     layout_a: Layout, layout_b: Layout, layout_c: Layout
 ](
     a: LayoutTensor[ftype, layout_a, _],
@@ -149,7 +150,7 @@ fn naiveDotProduct[
             c[i, j] = temp
 
 
-fn dotProductVectorized[
+def dotProductVectorized[
     layout_a: Layout, layout_b: Layout, layout_c: Layout
 ](
     a: LayoutTensor[ftype, layout_a, _],
@@ -182,7 +183,7 @@ fn dotProductVectorized[
             var temp: sftype = 0.0
 
             @parameter
-            fn dot_product[
+            def dot_product[
                 width: Int
             ](k: Int) unified {mut a, mut bT, mut temp, read i, read j}:
                 var v1 = a.load[width](i, k)
@@ -197,7 +198,7 @@ fn dotProductVectorized[
             c[i, j] = temp.reduce_add()
 
 
-fn naiveSoftmax[
+def naiveSoftmax[
     layout: Layout
 ](x: LayoutTensor[ftype, layout, MutAnyOrigin], *, temp: sftype = 1.0) -> None:
     """
@@ -223,7 +224,7 @@ fn naiveSoftmax[
             x[i, j] /= sum_exp / temp
 
 
-fn layerNorm[
+def layerNorm[
     layout_input: Layout,
     layout_gamma: Layout,
     layout_beta: Layout,
@@ -264,7 +265,7 @@ fn layerNorm[
             output[sl, i] = gamma[i] * normed + beta[i]
 
 
-fn feedForward[
+def feedForward[
     layout_x: Layout,
     layout_w0: Layout,
     layout_b0: Layout,
@@ -291,7 +292,7 @@ fn feedForward[
 
 @deprecated("Don't fully trust this, needs testing.")
 @always_inline("nodebug")
-fn layoutTensorDataTranspose2D[
+def layoutTensorDataTranspose2D[
     rows: Int, cols: Int
 ](
     tensor: LayoutTensor[ftype, Layout.row_major(rows, cols), MutAnyOrigin]
@@ -307,7 +308,7 @@ fn layoutTensorDataTranspose2D[
     return output
 
 
-fn naiveAttention[
+def naiveAttention[
     layout0: Layout,
     layout1: Layout,
     layout2: Layout,
@@ -331,7 +332,7 @@ fn naiveAttention[
     _myTensorCopyFrom(src=K, dest=KT, transposed=True)
 
     try:
-        matmul[transpose_b = True](scores, Q, K, None)
+        matmul[transpose_b = True](lt_to_tt(scores), lt_to_tt(Q), lt_to_tt(K), None)
         #naiveDotProduct(Q, KT, scores)
     except e:
         print(e, file=stderr)
@@ -353,7 +354,7 @@ fn naiveAttention[
 
     # modifies output in-place
     try:
-        matmul(output, scores_probs, V, None)
+        matmul(lt_to_tt(output), lt_to_tt(scores_probs), lt_to_tt(V), None)
         #naiveDotProduct(scores_probs, V, output)
     except e:
         print(e, file=stderr)
@@ -366,7 +367,7 @@ fn naiveAttention[
     # return attn @ V
 
 
-fn applyCausalMask[
+def applyCausalMask[
     layout: Layout
 ](scores: LayoutTensor[ftype, layout, MutAnyOrigin]):
     """Modifies data in-place."""
@@ -377,7 +378,7 @@ fn applyCausalMask[
             scores[i, j] = sftype(FloatLiteral.negative_infinity)
 
 
-fn applyMasks[
+def applyMasks[
     layout_scores: Layout, seq_len: Int
 ](
     scores: LayoutTensor[ftype, layout_scores, MutAnyOrigin],
@@ -400,7 +401,7 @@ fn applyMasks[
                 scores[i, j] = neg_inf
 
 
-fn crossEntropyLoss[
+def crossEntropyLoss[
     layout_logits: Layout, layout_targets: Layout
 ](
     logits: LayoutTensor[ftype, layout_logits, _],
@@ -430,7 +431,7 @@ fn crossEntropyLoss[
     return total_loss / sftype(seq_len)
 
 
-fn crossEntropyLossMasked[
+def crossEntropyLossMasked[
     layout_logits: Layout,
     layout_targets: Layout,
     layout_mask: Layout,
@@ -471,7 +472,7 @@ fn crossEntropyLossMasked[
 # BACKWARDS TIME!
 
 
-fn accumulateGrads[
+def accumulateGrads[
     layout: Layout
 ](
     *,
@@ -481,7 +482,7 @@ fn accumulateGrads[
     """Element-wise addition with SIMD."""
     comptime size = layout.size()
 
-    fn closure[width: Int](i: Int) unified {mut}:
+    def closure[width: Int](i: Int) unified {mut}:
         var v0 = src.ptr.load[width](i)
         var v1 = dest.ptr.load[width](i)
         var res = v0 + v1
@@ -490,7 +491,7 @@ fn accumulateGrads[
     vectorize[nelts](size, closure)
 
 
-fn crossEntropyLossBackward[
+def crossEntropyLossBackward[
     layout: Layout, seq_len: Int
 ](
     logits: LayoutTensor[ftype, layout, _],
@@ -516,7 +517,7 @@ fn crossEntropyLossBackward[
     comptime scale = sftype(1.0) / sftype(seq_len)
 
     # parameter unrolling "bug", do it manually
-    fn closure[width: Int](i: Int) unified {mut}:
+    def closure[width: Int](i: Int) unified {mut}:
         var v = d_logits.ptr.load[width](i)
         v *= scale
         d_logits.ptr.store[width](i, v)
@@ -524,7 +525,7 @@ fn crossEntropyLossBackward[
     vectorize[nelts](comptime (layout.size()), closure)
 
 
-fn weightAndBiasBackward[
+def weightAndBiasBackward[
     layout_input: Layout,
     layout_weights: Layout,
     layout_bias: Layout,
@@ -585,7 +586,7 @@ fn weightAndBiasBackward[
             Slice(0, seq_len), IndexList[1](0)
         ](IndexList[1](k))
 
-        fn closure[width: Int](i: Int) unified {mut}:
+        def closure[width: Int](i: Int) unified {mut}:
             var v0 = d_bias.ptr.load[width](i)
             var v1 = d_output_slice.ptr.load[width](i)
             var res = v0 + v1
@@ -594,7 +595,7 @@ fn weightAndBiasBackward[
         vectorize[nelts](d_out, closure)
     """
 
-fn layerNormBackward[layout_input: Layout, layout_output: Layout, layout_gamma: Layout](
+def layerNormBackward[layout_input: Layout, layout_output: Layout, layout_gamma: Layout](
         x: LayoutTensor[ftype, layout_input, _],
         gamma: LayoutTensor[ftype, layout_gamma, _],
         d_output: LayoutTensor[ftype, layout_output, _],
@@ -653,7 +654,7 @@ fn layerNormBackward[layout_input: Layout, layout_output: Layout, layout_gamma: 
             
             d_input[sl, i] = term1 - term2 - term3
         
-fn feedForwardBackward[
+def feedForwardBackward[
         layout_x: Layout,
         layout_w0: Layout,
         layout_b0: Layout,
@@ -692,7 +693,7 @@ fn feedForwardBackward[
     #act_fn.backward(hidden, d_hidden, d_hidden_pre_act)
     #weightAndBiasBackward(x, w0, b0, d_hidden_pre_act, d_x, d_w0, d_b0)
 
-fn naiveAttentionBackward[
+def naiveAttentionBackward[
         layout_q: Layout,
         layout_k: Layout, # same as layout_q
         layout_v: Layout,
@@ -729,8 +730,12 @@ fn naiveAttentionBackward[
     _myTensorCopyFrom(src=V, dest=V_T, transposed=True)
 
     var d_attn_probs = LayoutTensor[ftype, layout_attn, MutAnyOrigin].stack_allocation()
-    dotProductTiledVectorizedParallelized(d_output, V_T, d_attn_probs)
-
+    #dotProductTiledVectorizedParallelized(d_output, V_T, d_attn_probs)
+    try:
+        matmul(lt_to_tt(d_attn_probs), lt_to_tt(d_output), lt_to_tt(V_T))
+    except e:
+        print(String(e) + "naiveAttentionBackward", file=stderr)
+        naiveDotProduct(d_output, V_T, d_attn_probs)
     # Softmax backward
     var d_scores = LayoutTensor[ftype, layout_scores, MutAnyOrigin].stack_allocation().fill(0.0)
     for i in range(seq_len):
@@ -769,11 +774,11 @@ def myBestBenchmarkTest() raises:
     comptime warmups = 1000
     comptime times = 10000
     for _ in range(warmups):
-        matmul(expected, a, b, None)
+        matmul(lt_to_tt(expected), lt_to_tt(a), lt_to_tt(b), None)
     var start = perf_counter_ns()
     for _ in range(times):
         # known correct
-        matmul(expected, a, b, None)
+        matmul(lt_to_tt(expected), lt_to_tt(a), lt_to_tt(b), None)
         #naiveDotProduct(a, b, expected)
     var mid_best = perf_counter_ns()
 
@@ -812,7 +817,7 @@ def powersOfTwoTest() raises:
     )
 
 
-fn matmulCorrectnessTest() raises:
+def matmulCorrectnessTest() raises:
     """Test matrix multiplication against known values."""
     comptime M = 1 << 7
     comptime L = 1 << 5
@@ -852,7 +857,7 @@ fn matmulCorrectnessTest() raises:
     )
 
 
-fn isPowerOfTwo(m: Int) -> Bool:
+def isPowerOfTwo(m: Int) -> Bool:
     """Brian Kernighan's algorithm for set-bit-counting."""
     if m < 0:
         return False
