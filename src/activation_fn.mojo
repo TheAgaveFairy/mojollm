@@ -10,7 +10,7 @@ from std.testing import (
 from std.random import seed, randn
 
 from attention import ftype, sftype, nelts
-from helpers import compareBuffers, fillTensorRand # testing
+from helpers import compareBuffers, fillTensorRand  # testing
 
 
 # comptime activation_fn = fn(sftype) -> sftype # if was scalar
@@ -68,7 +68,7 @@ struct ReLU(ActivationFunction):
             var res = mask.select(vec, zeros)
             d_input.ptr.store[width](i, res)
 
-        vectorize[nelts](comptime(layout.size()), closure)
+        vectorize[nelts](comptime (layout.size()), closure)
 
 
 struct GELU(ActivationFunction):
@@ -136,9 +136,9 @@ struct GELU(ActivationFunction):
             comptime inverse_sqrttau = SIMD[ftype, width](1 / sqrttau)
             var cdf = halves * (ones + erf(nums / sqrt2_vec))
 
-            #var pdf = exp(
+            # var pdf = exp(
             #    neg_halves * nums * nums - term
-            #)  # or exp(-0.5 * x**2) / sqrt(tau)
+            # )  # or exp(-0.5 * x**2) / sqrt(tau)
             var pdf = exp(neg_halves * nums * nums) * inverse_sqrttau
 
             var upstream = d_input.ptr.load[width=width](i)
@@ -168,7 +168,9 @@ struct GELUTanh(ActivationFunction):
             comptime halves = SIMD[ftype, width](0.5)
             comptime ones = SIMD[ftype, width](1.0)
             var gelu = (
-                halves * nums * (ones + tanh(terms * (nums + scaling * nums_cubed)))
+                halves
+                * nums
+                * (ones + tanh(terms * (nums + scaling * nums_cubed)))
             )
             x.ptr.store[width=width](i, gelu)
 
@@ -207,7 +209,13 @@ struct GELUTanh(ActivationFunction):
             comptime halves = SIMD[ftype, width](0.5)
 
             var ts = tanh(ks * (nums + cs * (nums * nums * nums)))
-            var deriv = halves * ((ones + ts) + nums * (ones - (ts * ts)) * ks * (ones + threecs * nums * nums))
+            var deriv = halves * (
+                (ones + ts)
+                + nums
+                * (ones - (ts * ts))
+                * ks
+                * (ones + threecs * nums * nums)
+            )
             var upstream = d_input.ptr.load[width=width](i)
             var answer = upstream * deriv
             d_input.ptr.store[width=width](i, answer)
@@ -218,14 +226,18 @@ struct GELUTanh(ActivationFunction):
 struct GELUFast(ActivationFunction):
     """
     FAST implementation. NOT exact - use GELU. Tanh is a TODO.
-    GELUFast(x) = x * sigmoid(1.702 * x) https://arxiv.org/pdf/1606.08415 
+    GELUFast(x) = x * sigmoid(1.702 * x) https://arxiv.org/pdf/1606.08415
     """
 
     @staticmethod
     @always_inline("nodebug")
-    def _sigmoid[stype: DType, width: Int](x: SIMD[stype, width]) -> SIMD[stype, width]:
+    def _sigmoid[
+        stype: DType, width: Int
+    ](x: SIMD[stype, width]) -> SIMD[stype, width]:
         """SIMD Sigmoid that accepts any floating point type, not just ftype."""
-        comptime assert stype.is_floating_point(), "_sigmoid requires floating points"
+        comptime assert (
+            stype.is_floating_point()
+        ), "_sigmoid requires floating points"
         comptime ones = SIMD[stype, width](1.0)
         comptime neg_ones = SIMD[stype, width](-1.0)
         var input = x * neg_ones
@@ -234,7 +246,6 @@ struct GELUFast(ActivationFunction):
     @staticmethod
     @always_inline("nodebug")
     def forward[layout: Layout](x: LayoutTensor[ftype, layout, MutAnyOrigin]):
-
         @parameter
         def vectorize_closure[width: Int](i: Int) unified {mut}:
             var nums = x.ptr.load[width=width](i)
@@ -388,11 +399,24 @@ def GELUTorchForwardTest() raises:
     comptime for i in range(N):
         assert_almost_equal(my_fwd[i], ref_fwd[i], atol=1e-5, rtol=1e-5)
 
+
 def testApproximations() raises:
-    comptime xs: List[sftype] = [-3.0, -2.0, -1.0, -0.5, -0.25, 0.0, 0.25, 0.5, 1.0, 2.0, 3.0]
+    comptime xs: List[sftype] = [
+        -3.0,
+        -2.0,
+        -1.0,
+        -0.5,
+        -0.25,
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        2.0,
+        3.0,
+    ]
     comptime N = len(xs)
     comptime TestTensor = LayoutTensor[ftype, Layout.row_major(N), MutAnyOrigin]
-    
+
     var exact = TestTensor.stack_allocation()
     var tanh = TestTensor.stack_allocation()
     var sigmoid = TestTensor.stack_allocation()
@@ -413,12 +437,13 @@ def testApproximations() raises:
     print(tanh)
     print(sigmoid)
 
+
 def benchmarkGELU():
     seed(9001)
-    #fillTensorRand()
-    comptime N = 1000 
+    # fillTensorRand()
+    comptime N = 1000
     comptime TestTensor = LayoutTensor[ftype, Layout.row_major(N), MutAnyOrigin]
- 
+
     var exact = TestTensor.stack_allocation()
     var tanh = TestTensor.stack_allocation()
     var sigmoid = TestTensor.stack_allocation()

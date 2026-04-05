@@ -14,7 +14,9 @@ struct TokenizerParser(Copyable, ImplicitlyCopyable, Movable, Writable):
     comptime FLAG_SAVE_NAME = "--save-name"
     comptime FLAG_SAVE_NAME_SHORT = Self.FLAG_SAVE_NAME[byte=1:3]  # -s
     comptime FLAG_INPUT_FILENAME = "--input-filename"
-    comptime FLAG_INPUT_FILENAME_SHORT = Self.FLAG_INPUT_FILENAME[byte=1:3]  # -i
+    comptime FLAG_INPUT_FILENAME_SHORT = Self.FLAG_INPUT_FILENAME[
+        byte=1:3
+    ]  # -i
     comptime FLAG_TAG = "--tag"
     comptime FLAG_TAG_SHORT = Self.FLAG_TAG[byte=1:3]
 

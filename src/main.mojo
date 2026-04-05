@@ -7,7 +7,13 @@ from std.testing import assert_equal
 from layout import Layout, LayoutTensor
 from std.benchmark.compiler import keep
 
-from helpers import systemInfo, randTensorHeap, ColorsEnum, coloredString, showProgress
+from helpers import (
+    systemInfo,
+    randTensorHeap,
+    ColorsEnum,
+    coloredString,
+    showProgress,
+)
 from attention import (
     ftype,
     token_itype,
@@ -97,8 +103,10 @@ def main() raises:
     var args = TokenizerParser()
     if args.had_error:
         return
-    
-    var logger = CSVLogger[LLMInferenceRecord]("main_log_test_delete.csv")#(logFileName())
+
+    var logger = CSVLogger[LLMInferenceRecord](
+        "./logs/main_log_test_delete.csv"
+    )  # (logFileName())
     var device = "7600X 32GB"  # "RTX 3070" if has_accelerator() else "7600X"
     try:
         with open(args.input_filename, "r") as f:
@@ -109,14 +117,14 @@ def main() raises:
             var test_input = splitInput(input_tokens)
             # printIntSpan(test_input)
 
-            print(ModelParams.__str__())
+            print(ModelParams())
             print("LLM Size In Bytes()", prettyPrintBytes(LLM.sizeInBytes()))
             var llm = LLM()
 
             comptime times = 1
             var start = perf_counter_ns()
             for i in range(times):
-                var tlc = 0 # tok_list_count
+                var tlc = 0  # tok_list_count
                 for tok_list in test_input[:20]:
                     var iter_start = perf_counter_ns()
                     comptime if display:
@@ -142,7 +150,7 @@ def main() raises:
                             coloredString(predicted_tokstr),
                         )
                     # var tokens_as_tensor = LayoutTensor[
-                    #var loss = crossEntropyLoss(output, test_input)
+                    # var loss = crossEntropyLoss(output, test_input)
                     var iter_end = perf_counter_ns()
                     var iter_elapsed = Int(iter_end - iter_start)
                     var log_record = LLMInferenceRecord(
@@ -152,8 +160,7 @@ def main() raises:
                         predicted_tokstr,
                         0.69,
                         69,
-                        ModelParams(),
-                        ftype,
+                        String(ftype),
                     )
                     logger.log(log_record)
                     tlc += 1

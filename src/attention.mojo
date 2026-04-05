@@ -20,8 +20,11 @@ from std.compile import compile_info
 import std.benchmark  # run, Unit.ms
 
 # from kernels.nn.softmax import softmax
+
+# external deps
 import emberjson
 
+# this project
 from helpers import (
     showProgress,
     cleanFunctionName,
@@ -80,15 +83,7 @@ def _arenaTensorHelper[
 
 
 @fieldwise_init
-struct ModelParams[  # [num_transformer_blocks: Int = 1 << 4,
-    # vocab_size: Int = 1 << 13,
-    # max_batch_size: Int = 1 << 4, # unused for now
-    # seq_len: Int = 1 << 4,
-    # d_model: Int = 1 << 6,
-    # d_k: Int = d_model,
-    # d_v: Int = d_model,
-    # d_ff: Int = d_model << 2
-](Copyable, Writable, emberjson.JsonSerializable):
+struct ModelParams(TrivialRegisterPassable, Defaultable, Writable):
     comptime num_transformer_blocks = 1 << 4
     comptime vocab_size = 1 << 13
 
@@ -101,44 +96,36 @@ struct ModelParams[  # [num_transformer_blocks: Int = 1 << 4,
 
     comptime d_ff = Self.d_model << 2  # d_model * 4 is common, apparently
 
-    @staticmethod
-    def __str__() -> String:
-        var result = """
-ModelParams:
-    num_transformer_blocks = {}
-    vocab_size = {}
+    # if we need a runtime (rt) version for Json serializing, etc
+    var rt_num_transformer_blocks: Int
+    var rt_vocab_size: Int
 
-    max_batch_size = {} # not in use right now
-    seq_len = {}
-    d_model = {}
+    var rt_max_batch_size: Int
+    var rt_seq_len: Int
+    var rt_d_model: Int
 
-    d_k = Self.d_model
-    d_v = Self.d_model
+    var rt_d_k: Int
+    var rt_d_v: Int
 
-    d_ff = Self.d_model << 2  # d_model * 4 is common, apparently\n""".format(
-            Self.num_transformer_blocks,
-            Self.vocab_size,
-            Self.max_batch_size,
-            Self.seq_len,
-            Self.d_model,
-        )
-        return result
+    var rt_d_ff: Int
 
-    def write_json(self, mut writer: Some[emberjson.Serializer]):
-        #var result = t'{"num_transformer_blocks":{Self.num_transformer_blocks},"vocab_size":{Self.vocab_size},"max_batch_size":{Self.max_batch_size},"seq_len":{Self.seq_len},"d_model":{Self.d_model}}'
-        var result = '"num_transformer_blocks":{},"vocab_size":{},"max_batch_size":{},"seq_len":{},"d_model":{},"d_k":{},"d_v":{},"d_ff":{}'.format(
-        Self.num_transformer_blocks,
-            Self.vocab_size,
-            Self.max_batch_size,
-            Self.seq_len,
-            Self.d_model,
-            Self.d_k,
-            Self.d_v,
-            Self.d_ff
-        )
-        result = "{" + result + "}"
-        writer.write(result)
-        
+    #@deprecated("You shouldn't really be instantiating this for runtime.")
+    def __init__(out self):
+        """Struct intended to be used as comptime only!
+        This is just for if you need a runtime version for reflection, etc."""
+        self.rt_num_transformer_blocks = Self.num_transformer_blocks
+        self.rt_vocab_size = Self.vocab_size
+
+        self.rt_max_batch_size = Self.max_batch_size
+        self.rt_seq_len = Self.seq_len
+        self.rt_d_model = Self.d_model
+
+        self.rt_d_k = Self.d_k
+        self.rt_d_v = Self.d_v
+
+        self.rt_d_ff = Self.d_ff
+           
+    #def write_to(self, mut writer: Some[Writer]):
 
 trait Weights:
     """Defaultable removed b/c arena."""
