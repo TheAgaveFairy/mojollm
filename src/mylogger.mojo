@@ -11,7 +11,8 @@ from std.reflection.struct_fields import is_struct_type
 from std.testing import assert_equal, assert_true, TestSuite
 from std.subprocess import run as subprocessRun
 
-import emberjson  # 3rd party dep, talks that it will be adopted by stdlib
+# deprecated until Mojo 1.0
+#import emberjson  # 3rd party dep, talks that it will be adopted by stdlib
 
 from attention import ModelParams, ftype, sftype
 
@@ -227,6 +228,8 @@ def serializeTest() raises:
         0.01,
         String(ftype),  # ModelParams() goes before ftype
     )
+    
+    _ = """
     var train_json = emberjson.serialize(rec_train)
     # var infer_json = emberjson.serialize(rec_infer)
     print("TRAIN json test...\n", train_json)
@@ -240,7 +243,7 @@ def serializeTest() raises:
     print("true prettyprint\n", mp_pp)
     var mp_pp_f = emberjson.to_string[pretty=False](mp_s)  # prints {"key":123}
     print("false prettyprint\n", mp_pp_f)
-
+    """
     assert_true(False)
 
 def reflectionPrintTest() raises:

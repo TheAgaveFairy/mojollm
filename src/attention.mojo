@@ -22,7 +22,7 @@ import std.benchmark  # run, Unit.ms
 # from kernels.nn.softmax import softmax
 
 # external deps
-import emberjson
+#import emberjson
 
 # this project
 from helpers import (

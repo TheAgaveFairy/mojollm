@@ -104,9 +104,11 @@ def main() raises:
     if args.had_error:
         return
 
+    comptime log_path = "./logs/main_log_test_delete.csv"
     var logger = CSVLogger[LLMInferenceRecord](
-        "./logs/main_log_test_delete.csv"
+        log_path
     )  # (logFileName())
+    print("logger setup at:", log_path)
     var device = "7600X 32GB"  # "RTX 3070" if has_accelerator() else "7600X"
     try:
         with open(args.input_filename, "r") as f:

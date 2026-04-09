@@ -27,9 +27,13 @@ trait ActivationFunction:
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
-        d_input: LayoutTensor[ftype, layout, MutAnyOrigin],
+        d_output: LayoutTensor[ftype, layout, _],
+        d_z: LayoutTensor[ftype, layout, MutAnyOrigin],
     ):
-        """Operates in-place on pre-filled d_input."""
+        """Takes the original forward input 'x',
+        the upstream gradient, d_output,
+        and calculates the d_z gradient as our output for pre-act.
+        """
         ...
 
 
@@ -53,20 +57,20 @@ struct ReLU(ActivationFunction):
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
-        d_input: LayoutTensor[ftype, layout, MutAnyOrigin],
+        d_output: LayoutTensor[ftype, layout, _],
+        d_z: LayoutTensor[ftype, layout, MutAnyOrigin],
     ):
         """
-        SCALAR FORM.
-        return d_output if x > 0.0 else 0.0
+        SCALAR FORM is "return d_output if x > 0.0 else 0.0".
         SIMD enhanced.
         """
 
         def closure[width: Int](i: Int) unified {mut}:
             comptime zeros = SIMD[ftype, width](0.0)
-            var vec = d_input.ptr.load[width](i)
+            var vec = d_output.ptr.load[width](i)
             var mask = vec.gt(zeros)
             var res = mask.select(vec, zeros)
-            d_input.ptr.store[width](i, res)
+            d_z.ptr.store[width](i, res)
 
         vectorize[nelts](comptime (layout.size()), closure)
 
@@ -106,9 +110,8 @@ struct GELU(ActivationFunction):
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
-        d_input: LayoutTensor[
-            ftype, layout, MutAnyOrigin
-        ],  # could split off "d_output _as_ upstream"
+        d_output: LayoutTensor[ftype, layout, _],
+        d_z: LayoutTensor[ftype, layout, MutAnyOrigin],
     ):
         """
         (x * CDF(x))' = x'CDF(x) + xCDF'(x) .
@@ -141,9 +144,9 @@ struct GELU(ActivationFunction):
             # )  # or exp(-0.5 * x**2) / sqrt(tau)
             var pdf = exp(neg_halves * nums * nums) * inverse_sqrttau
 
-            var upstream = d_input.ptr.load[width=width](i)
+            var upstream = d_output.ptr.load[width=width](i)
             var answer = upstream * (cdf + nums * pdf)
-            d_input.ptr.store[width=width](i, answer)
+            d_z.ptr.store[width=width](i, answer)
 
         vectorize[nelts](comptime (layout.size()), vectorize_closure)
 
@@ -182,9 +185,8 @@ struct GELUTanh(ActivationFunction):
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
-        d_input: LayoutTensor[
-            ftype, layout, MutAnyOrigin
-        ],  # could split off "d_output _as_ upstream"
+        d_output: LayoutTensor[ftype, layout, _],
+        d_z: LayoutTensor[ftype, layout, MutAnyOrigin],
     ):
         """
         k = sqrt(2 / pi)
@@ -192,9 +194,6 @@ struct GELUTanh(ActivationFunction):
         t = tanh(z) = tanh(k * (x + c * x^3))
 
         dy/dx = 0.5 * ((1 + t) + x * (1 - t^2) * k * (1 + 3 * c * x^2))
-
-        Modifies d_input in-place, assuming it was already loaded with d_output.
-        This approach is less explicit and more error prone, but a touch faster.
         """
         comptime k = sqrt(2.0 / pi)
         comptime c = 0.044715
@@ -216,9 +215,9 @@ struct GELUTanh(ActivationFunction):
                 * ks
                 * (ones + threecs * nums * nums)
             )
-            var upstream = d_input.ptr.load[width=width](i)
+            var upstream = d_output.ptr.load[width=width](i)
             var answer = upstream * deriv
-            d_input.ptr.store[width=width](i, answer)
+            d_z.ptr.store[width=width](i, answer)
 
         vectorize[nelts](comptime (layout.size()), vectorize_closure)
 
@@ -261,9 +260,8 @@ struct GELUFast(ActivationFunction):
         layout: Layout
     ](
         x: LayoutTensor[ftype, layout, _],
-        d_input: LayoutTensor[
-            ftype, layout, MutAnyOrigin
-        ],  # could split off "d_output _as_ upstream"
+        d_output: LayoutTensor[ftype, layout, _],
+        d_z: LayoutTensor[ftype, layout, MutAnyOrigin],
     ):
         """
         f'(1.702x) = sigmoid(1.702x) + (x * 1.702 * sigmoid(1.702x) * (1 - sigmoid(1.702x)))
@@ -279,9 +277,9 @@ struct GELUFast(ActivationFunction):
             var nums = x.ptr.load[width=width](i)
             var s = Self._sigmoid(nums * alphas)
             var deriv = s + alphas * nums * s * (ones - s)
-            var upstream = d_input.ptr.load[width=width](i)
+            var upstream = d_output.ptr.load[width=width](i)
             var answer = upstream * deriv
-            d_input.ptr.store[width=width](i, answer)
+            d_z.ptr.store[width=width](i, answer)
 
         vectorize[nelts](comptime (layout.size()), vectorize_closure)
 
