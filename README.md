@@ -1,4 +1,4 @@
-# MojoCNN: LeNet-5 Implementation from Scratch (WIP)
+# MojoLLM: Tiny LLM (GPT-2) from Scratch (WIP)
 
 A high-performance implementation of a GPT-2-like LLM built entirely from scratch in Mojo🔥 with a custom tokenizer, CPU ops, logging, allocators, and the like. Forward pass is done for CPU at the time you're reading this. I still need to finish training, optimizers, logging, and clean things up.
 
