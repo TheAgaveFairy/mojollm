@@ -46,7 +46,7 @@ def prependFilename(p: Path, prefix: String) -> Path:
     var suffix = p.suffix()
     
     # stem is filename minus the suffix
-    var stem = filename[byte=: len(filename) - len(suffix)]
+    var stem = filename[byte=: filename.count_codepoints() - suffix.count_codepoints()]
     var new_filename = prefix + stem + suffix
     
     return Path("/".join(parts[:-1])) / new_filename

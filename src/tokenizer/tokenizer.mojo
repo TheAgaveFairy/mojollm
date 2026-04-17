@@ -370,7 +370,7 @@ struct Tokenizer(Copyable, Movable):
             with open(filename, "r") as f:
                 var lines = f.read().split("\n")
                 for i, line in enumerate(lines):
-                    if not len(line):
+                    if not line.count_codepoints():
                         _ = lines.pop(i)
                 if len(lines) != 2:
                     # for line in lines:

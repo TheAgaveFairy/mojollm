@@ -9,6 +9,7 @@ out.folded
 flamegraph*.svg
 
 main
+CLAUDE.md
 
 claudebackwardsfiles/
 logs/

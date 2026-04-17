@@ -287,8 +287,9 @@ struct GELUFast(ActivationFunction):
 def main() raises:
     var suite = TestSuite()
     suite.test[ReLUTest]()
+    #suite.test[AnotherTest]()
     suite.test[testApproximations]()
-    suite.test[GELUTorchForwardTest]()
+    suite.test[GELUTorchTest]()
     suite^.run()
 
 
@@ -331,15 +332,16 @@ def AnotherTest() raises:
     var t = ScalarTensor.stack_allocation().fill(
         x
     )  # pretend we GELU this forward
-    var grad_t = ScalarTensor.stack_allocation().fill(1.0)
-    GELU.backward(t, grad_t)
+    var d_output = ScalarTensor.stack_allocation().fill(1.0)
+    var d_z = ScalarTensor.stack_allocation().fill(0.0)
+    GELU.backward(t, d_output, d_z)
 
-    var analytic_dx = grad_t[0]
+    var analytic_dx = d_z[0]
     var numeric_dx = numerical_deriv(x)
     assert_almost_equal(analytic_dx, numeric_dx, "almost equal", atol=1e-4)
 
 
-def GELUTorchForwardTest() raises:
+def GELUTorchTest() raises:
     """Used torch to get some reference values, see utils."""
     comptime xs: List[sftype] = [
         -4.0,
@@ -383,19 +385,40 @@ def GELUTorchForwardTest() raises:
         4.9999985695,
     ]  #  torch.nn.functional.gelu(xs as a tensor, approx = 'none')
 
+
+    comptime expected_backward: List[sftype] = [
+        -0.0005036294, -0.0188055336, 0.1274691522, -0.1666308641,
+        0.00000000, 0.4204768240, 0.500000, 0.5795231462,
+        0.4337475300, -1.0833153725, 2.2549383640, 0.00000000,
+        1.0376110077, 1.0119456053, 1.0005036592, 0.5000035763,
+    ]
+
     var ref_fwd = TestTensor.stack_allocation()
     var my_fwd = TestTensor.stack_allocation()
 
+    var x = TestTensor.stack_allocation()
+    var d_output = TestTensor.stack_allocation()
+    var d_z = TestTensor.stack_allocation().fill(0.0)
+    var expected = TestTensor.stack_allocation()
+
+
     comptime for i in range(N):
+        # fwd
         ref_fwd[i] = materialize[expected_forward[i]]()
         my_fwd[i] = materialize[xs[i]]()
+        # back
+        x[i] = materialize[xs[i]]()
+        d_output[i] = materialize[dys[i]]()
+        expected[i] = materialize[expected_backward[i]]()
 
-    GELU.forward(my_fwd)
+    GELU.forward(my_fwd) # modifies in-place
+    GELU.backward(x, d_output, d_z)
     # print(my_fwd)
     # print(ref_fwd)
 
     comptime for i in range(N):
         assert_almost_equal(my_fwd[i], ref_fwd[i], atol=1e-5, rtol=1e-5)
+        assert_almost_equal(d_z[i], expected[i], atol=1e-5, rtol=1e-5)
 
 
 def testApproximations() raises:

@@ -14,8 +14,8 @@ buildmain = { cmd = "mojo build -Xlinker -lm main.mojo", cwd = "src" }
 flamegraphs = { cmd = "./flamegraphing/graphmain.sh; ./flamegraphing/graphtokenizer.sh;", cwd = "src" }
 
 [dependencies]
-#mojo = ">=0.26.1.0.dev2025123005,<0.27"
-mojo = "==0.26.3.0.dev2026033105" # emberjson tied
+mojo = ">=0.26.1.0.dev2025123005,<0.27"
+#mojo = "==0.26.3.0.dev2026033105" # emberjson tied
 max = ">=26.1.0.dev2025123005,<27"
 regex = ">=2026.2.28,<2027"
 #EmberJson = { git = "https://github.com/bgreni/EmberJson.git" }
